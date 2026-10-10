@@ -105,7 +105,7 @@ function schedLabel(chore, st, who) {
 
 /* ---------- Week ---------- */
 
-export function renderWeek(el, { keys, todayKey, people, who, daysMap, totals, dailyChores, scheduledFor }) {
+export function renderWeek(el, { keys, todayKey, people, who, daysMap, totals, dailyFor, scheduledFor }) {
   const cols = keys.map((key) => {
     const future = key > todayKey;
     const day = daysMap[key];
@@ -133,7 +133,7 @@ export function renderWeek(el, { keys, todayKey, people, who, daysMap, totals, d
       }, h("span", { text: p.icon }), h("b", { text: met ? `${pts}✓` : pts }));
     }).filter(Boolean);
 
-    const done = doneList(dailyChores, day);
+    const done = doneList(dailyFor(day), day);
     const shown = done.slice(0, 5);
     const chips = shown.map((d) => h("li", {
       class: "chip",
@@ -211,6 +211,7 @@ function choreRows({ chores, claimed, people, who, future, onToggle }) {
       const slotId = `${chore.id}#${i}`;
       const label = chore.slotsPerDay > 1 ? `${chore.name} (${i + 1} of ${chore.slotsPerDay})` : chore.name;
       const by = claimed[slotId];
+      if (!by && i >= (chore.activeSlots ?? chore.slotsPerDay)) continue; // a retired slot nobody used
       // Assignee first, so the expected person's button is the first one under their thumb.
       const order = chore.assignee ? [...people].sort((a, b) => (b.id === chore.assignee) - (a.id === chore.assignee)) : people;
       const choices = by ? [who[by] ? { id: by, ...who[by] } : { id: by, name: by, icon: "?", color: "#888888" }] : order;
@@ -243,12 +244,12 @@ function choreRows({ chores, claimed, people, who, future, onToggle }) {
   return rows;
 }
 
-export function renderDay(el, { key, todayKey, dailyChores, scheduled, people, who, day, onToggle, onUndo, onReset }) {
+export function renderDay(el, { key, todayKey, daily, scheduled, people, who, day, onToggle, onUndo, onReset }) {
   const claimed = day.claimed || {};
   const future = key > todayKey;
   const common = { claimed, people, who, future, onToggle };
   const schedRows = choreRows({ ...common, chores: scheduled });
-  const dailyRows = choreRows({ ...common, chores: dailyChores });
+  const dailyRows = choreRows({ ...common, chores: daily });
   const doneCount = Object.keys(claimed).length;
   const total = schedRows.length + dailyRows.length;
   fill(el,

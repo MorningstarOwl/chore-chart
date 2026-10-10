@@ -12,17 +12,25 @@ const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "
 
 let openPicker = null; // id of the person whose icon menu is open, kept across re-renders
 let scheduleDraft = null; // the schedule form's working copy while it is open
+let choreDraft = null; // the everyday-chore form's working copy while it is open
 
 /** True while a form is mid-edit, so a background refresh must not redraw over it. */
 export function settingsBusy() {
-  return scheduleDraft !== null;
+  return scheduleDraft !== null || choreDraft !== null;
 }
 
 /* ---------- Icon menu ---------- */
 
-function iconMenu(groups, current, onPick, { prefer } = {}) {
+function iconMenu(groups, current, onPick, { prefer, allowNone } = {}) {
   const ordered = prefer ? [...groups].sort((a, b) => (b.name === prefer) - (a.name === prefer)) : groups;
-  return h("div", { class: "icons" }, ordered.map((g) => h("div", { class: "icons__group" },
+  return h("div", { class: "icons" },
+    allowNone ? h("button", {
+      class: `link-btn icons__none${current ? "" : " icons__btn--on"}`,
+      text: "No icon",
+      attrs: { type: "button", "aria-pressed": current ? "false" : "true" },
+      on: { click: () => onPick(null) },
+    }) : null,
+    ordered.map((g) => h("div", { class: "icons__group" },
     h("h4", { class: "icons__title", text: g.name }),
     h("div", { class: "icons__grid", attrs: { role: "group", "aria-label": g.name } }, g.icons.map((icon) => h("button", {
       class: `icons__btn${icon === current ? " icons__btn--on" : ""}`,
@@ -301,7 +309,112 @@ function scheduleForm(ctx) {
   return form;
 }
 
-export function renderSchedule(el, { household, icons, todayKey, onSave, onError, redraw }) {
+/* ---------- Everyday chores ---------- */
+
+const TIMES = [[1, "once a day"], [2, "twice a day"], [3, "3 times a day"], [4, "4 times a day"]];
+const timesText = (n) => (TIMES.find(([v]) => v === n) || [n, `${n} times a day`])[1];
+
+function choreForm({ icons, onSave, onCancel }) {
+  const d = choreDraft;
+  const error = h("p", { class: "form__error", attrs: { role: "alert" } });
+  const iconSlot = h("div");
+  const iconBtn = h("button", { class: "icon-choice", text: d.icon || "＋", attrs: { type: "button", "aria-label": "Choose icon" } });
+  iconBtn.addEventListener("click", () => {
+    if (iconSlot.firstChild) return iconSlot.replaceChildren();
+    iconSlot.replaceChildren(iconMenu(icons, d.icon, (icon) => {
+      d.icon = icon;
+      iconBtn.textContent = icon || "＋";
+      iconSlot.replaceChildren();
+    }, { prefer: "Household", allowNone: true }));
+  });
+  return h("form", {
+    class: "sched-form chore-form",
+    on: {
+      submit: async (e) => {
+        e.preventDefault();
+        error.textContent = "";
+        try {
+          await onSave(d.id, { name: d.name, icon: d.icon, points: d.points, slotsPerDay: d.slotsPerDay });
+        } catch (err) {
+          error.textContent = err.message;
+        }
+      },
+    },
+  },
+    h("h3", { class: "sched-form__title", text: d.id ? "Edit everyday chore" : "New everyday chore" }),
+    h("div", { class: "form__row form__row--name" },
+      h("div", { class: "field" }, h("span", { class: "field__label", text: "Icon" }), iconBtn),
+      h("label", { class: "field field--grow" }, h("span", { class: "field__label", text: "Chore" }),
+        h("input", {
+          class: "field__input",
+          attrs: { type: "text", value: d.name, maxlength: "40", placeholder: "e.g. Feed the cat", required: true, autocomplete: "off" },
+          on: { input: (e) => { d.name = e.target.value; } },
+        }))),
+    iconSlot,
+    h("div", { class: "form__row form__row--split" },
+      h("label", { class: "field" }, h("span", { class: "field__label", text: "Points" }),
+        select(Array.from({ length: 10 }, (_, i) => [i + 1, String(i + 1)]), d.points, (v) => { d.points = Number(v); }, "Points")),
+      h("label", { class: "field" }, h("span", { class: "field__label", text: "How many times a day" }),
+        select(TIMES, d.slotsPerDay, (v) => { d.slotsPerDay = Number(v); }, "How many times a day"))),
+    h("p", { class: "form__hint", text: "\"Twice a day\" means two people can each do it once (or one person twice), like feeding pets morning and evening." }),
+    error,
+    h("div", { class: "form__actions" },
+      h("button", { class: "primary", text: d.id ? "Save changes" : "Add chore", attrs: { type: "submit" } }),
+      h("button", { text: "Cancel", attrs: { type: "button" }, on: { click: onCancel } })));
+}
+
+function everydaySection({ household, icons, onSaveChore, onOrder, onError, redraw }) {
+  const active = household.chores.filter((c) => !c.archived);
+  const removed = household.chores.filter((c) => c.archived);
+  const ctx = {
+    icons,
+    onSave: async (id, fields) => { await onSaveChore(id, fields); choreDraft = null; redraw(); },
+    onCancel: () => { choreDraft = null; redraw(); },
+  };
+  const act = async (fn) => { try { await fn(); } catch (err) { onError(err.message); } };
+  const move = (i, by) => {
+    const ids = household.chores.map((c) => c.id);
+    const from = ids.indexOf(active[i].id), to = ids.indexOf(active[i + by].id);
+    [ids[from], ids[to]] = [ids[to], ids[from]];
+    act(() => onOrder(ids));
+  };
+
+  const rows = active.map((c, i) => choreDraft && choreDraft.id === c.id ? h("li", {}, choreForm(ctx)) : h("li", { class: "daily-item" },
+    h("span", { class: "daily-item__icon", text: c.icon || "", attrs: { "aria-hidden": "true" } }),
+    h("div", { class: "daily-item__body" },
+      h("div", { class: "daily-item__name", text: c.name }),
+      h("div", { class: "daily-item__meta", text: `${c.points} pt${c.points > 1 ? "s" : ""} · ${timesText(c.slotsPerDay)}` })),
+    h("div", { class: "daily-item__actions" },
+      h("button", { class: "icon-btn", text: "↑", attrs: { type: "button", "aria-label": `Move ${c.name} up`, disabled: i === 0 }, on: { click: () => move(i, -1) } }),
+      h("button", { class: "icon-btn", text: "↓", attrs: { type: "button", "aria-label": `Move ${c.name} down`, disabled: i === active.length - 1 }, on: { click: () => move(i, 1) } }),
+      h("button", { text: "Edit", attrs: { type: "button", "aria-label": `Edit ${c.name}` }, on: { click: () => { choreDraft = { ...c }; redraw(); } } }),
+      h("button", {
+        class: "danger", text: "Remove", attrs: { type: "button", "aria-label": `Remove ${c.name}` },
+        on: { click: () => { if (confirm(`Take "${c.name}" off the everyday list? Points already earned for it stay counted.`)) act(() => onSaveChore(c.id, { archived: true })); } },
+      }))));
+
+  const adding = choreDraft && !choreDraft.id;
+  return h("section", { class: "chores-section" },
+    h("h2", { class: "section-title", text: "Every day" }),
+    h("p", { class: "page-intro", text: "The list on every day's page. Use the arrows to change the order everyone sees." }),
+    adding ? choreForm(ctx) : h("button", {
+      class: "primary add-sched",
+      text: "+ Add an everyday chore",
+      attrs: { type: "button" },
+      on: { click: () => { choreDraft = { id: null, name: "", icon: null, points: 1, slotsPerDay: 1 }; redraw(); } },
+    }),
+    rows.length ? h("ul", { class: "daily-list" }, rows) : h("p", { class: "empty", text: "No everyday chores yet." }),
+    removed.length ? h("div", { class: "removed" },
+      h("h3", { class: "section-title", text: "Removed" }),
+      h("ul", { class: "removed__list" }, removed.map((c) => h("li", { class: "removed__item" },
+        h("span", { text: `${c.icon ? `${c.icon} ` : ""}${c.name}` }),
+        h("button", { class: "link-btn", text: "Bring back", attrs: { type: "button" }, on: { click: () => act(() => onSaveChore(c.id, { archived: false })) } })))))
+      : null);
+}
+
+/* ---------- Scheduled chores ---------- */
+
+function scheduleSection({ household, icons, todayKey, onSave, onError, redraw }) {
   const people = household.people.filter((p) => !p.archived);
   const who = Object.fromEntries(household.people.map((p) => [p.id, p]));
   const active = household.schedules.filter((s) => !s.archived);
@@ -343,7 +456,8 @@ export function renderSchedule(el, { household, icons, todayKey, onSave, onError
           },
         }))));
 
-  fill(el,
+  return h("section", { class: "chores-section" },
+    h("h2", { class: "section-title", text: "On particular days" }),
     h("p", { class: "page-intro", text: "Chores that happen on particular days, like bin night or mowing the lawn. They repeat by themselves and show up on the calendar ahead of time." }),
     scheduleDraft ? scheduleForm(ctx) : h("button", {
       class: "primary add-sched",
@@ -353,6 +467,10 @@ export function renderSchedule(el, { household, icons, todayKey, onSave, onError
     }),
     items.length ? h("ul", { class: "sched-list" }, items)
       : scheduleDraft ? null : h("p", { class: "empty", text: "Nothing scheduled yet." }));
+}
 
-  el.querySelector(".sched-form input")?.focus();
+/** The Chores page: the everyday list, then the scheduled ones. */
+export function renderChores(el, ctx) {
+  fill(el, everydaySection(ctx), scheduleSection(ctx));
+  el.querySelector(".sched-form input[type=text]")?.focus();
 }

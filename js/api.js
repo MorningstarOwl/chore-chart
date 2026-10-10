@@ -60,3 +60,13 @@ export async function fetchIcons() {
   if (!res.ok) throw new Error(`icons: ${res.status}`);
   return (await res.json()).groups;
 }
+
+/** Create (no id) or update an everyday chore; resolves to the whole household. */
+export function saveChore(id, fields) {
+  return post(id ? `api/chores/${id}` : "api/chores", fields);
+}
+
+/** Put the everyday chores in this order (every id, once). */
+export function orderChores(ids) {
+  return post("api/chore-order", { ids });
+}

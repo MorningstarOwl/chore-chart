@@ -6,6 +6,7 @@
     <meta name="color-scheme" content="light dark" />
     <title>{{title}}</title>
     <link rel="stylesheet" href="styles.css" />
+    <script src="js/theme.js"></script>
   </head>
   <body>
     <div id="app">
@@ -14,7 +15,10 @@
 
       <header class="top">
         <div class="top__title">
-          <h1>{{title}}</h1>
+          <div class="top__brand">
+            <h1>{{title}}</h1>
+            <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Switch between light and dark mode">🌙</button>
+          </div>
           <p id="period-label" class="top__period" aria-live="polite"></p>
         </div>
         <nav class="top__nav" aria-label="Calendar">
@@ -29,7 +33,7 @@
           </div>
           <div class="seg seg--menu">
             <a id="tab-people" href="#people"><span aria-hidden="true">👥</span> People</a>
-            <a id="tab-schedule" href="#schedule"><span aria-hidden="true">📅</span> Schedule</a>
+            <a id="tab-chores" href="#chores"><span aria-hidden="true">🧹</span> Chores</a>
           </div>
         </nav>
       </header>

@@ -39,8 +39,9 @@
   --warn-text: #7a4500;
 }
 
+/* Dark colours: from the system setting unless the page's toggle chose light, or forced by the toggle. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #181614;
     --surface: #232120;
     --surface-2: #2c2927;
@@ -60,6 +61,29 @@
     --warn-text: #f1db96;
   }
 }
+
+:root[data-theme="dark"] {
+  --bg: #181614;
+  --surface: #232120;
+  --surface-2: #2c2927;
+  --border: #3a3633;
+  --text: #ece5dc;
+  --muted: #a59c91;
+  --accent: #e0a868;
+  --today: #e0a868;
+  --focus: #8ab4f8;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+
+  --crit-bg: #3e1a1a;
+  --crit-border: #e43b3b;
+  --crit-text: #f3c2c2;
+  --warn-bg: #3a2e0a;
+  --warn-border: #e4bd3b;
+  --warn-text: #f1db96;
+}
+
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
@@ -108,6 +132,8 @@ a { color: inherit; }
   justify-content: space-between;
   gap: var(--space-3);
 }
+.top__brand { display: flex; align-items: center; gap: var(--space-2); }
+.theme-toggle { min-width: 40px; min-height: 40px; width: 40px; height: 40px; padding: 0; font-size: 18px; line-height: 1; }
 .top h1 { font-size: var(--text-xl); letter-spacing: -0.5px; color: var(--accent); }
 .top__period { font-size: var(--text-lg); font-weight: 600; margin-top: var(--space-1); }
 .top__nav { display: flex; gap: var(--space-2); flex-wrap: wrap; }
@@ -531,6 +557,29 @@ button.danger { color: var(--crit-text); }
 .removed__list { list-style: none; display: flex; flex-wrap: wrap; gap: var(--space-3); }
 .removed__item { display: flex; align-items: center; gap: var(--space-2); opacity: 0.8; }
 
+/* Everyday chores editor */
+.chores-section + .chores-section { margin-top: var(--space-6); }
+.chores-section > .section-title { font-size: var(--text-sm); color: var(--text); margin-top: 0; }
+.daily-list { list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(520px, 1fr)); gap: var(--space-2); }
+.daily-list > li:has(.chore-form) { grid-column: 1 / -1; }
+.daily-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+}
+.daily-item__icon { font-size: 24px; width: 28px; text-align: center; color: var(--muted); }
+.daily-item__body { flex: 1; min-width: 0; }
+.daily-item__name { font-weight: 600; }
+.daily-item__meta { font-size: var(--text-xs); color: var(--muted); }
+.daily-item__actions { display: flex; gap: 4px; flex: none; }
+.daily-item__actions button { min-height: 36px; padding: 0 var(--space-3); }
+.daily-item__actions .icon-btn { min-width: 36px; width: 36px; padding: 0; }
+.icons__none { align-self: flex-start; }
+
 /* Schedule */
 .add-sched { margin-bottom: var(--space-4); }
 .sched-list { list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: var(--space-3); }
@@ -576,6 +625,7 @@ button.danger { color: var(--crit-text); }
 .weekday { width: 40px; height: 40px; min-width: 40px; min-height: 40px; padding: 0; font-weight: 700; }
 .weekday[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
 .form__preview { padding: var(--space-3); border-radius: var(--radius-sm); background: var(--surface-2); font-weight: 600; }
+.form__hint { color: var(--muted); font-size: var(--text-sm); }
 .form__error { color: var(--crit-text); font-weight: 600; }
 .form__error:empty { display: none; }
 .form__actions { display: flex; gap: var(--space-2); }
@@ -604,7 +654,9 @@ button.danger { color: var(--crit-text); }
   .cell__total { display: none; }
   .dot { width: 9px; height: 9px; }
   .chores { grid-template-columns: 1fr; }
-  .people, .sched-list { grid-template-columns: 1fr; }
+  .people, .sched-list, .daily-list { grid-template-columns: 1fr; }
+  .daily-item { flex-wrap: wrap; }
+  .daily-item__actions { width: 100%; justify-content: flex-end; }
   .seg--menu { width: 100%; }
   .seg--menu a { flex: 1; }
   .sched-form { padding: var(--space-4); }

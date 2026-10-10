@@ -101,7 +101,30 @@ export function scheduledFor(schedules, key, day) {
     .map(scheduleChore);
 }
 
+/**
+ * The everyday list as it applies to one day. Current chores as they are now, but a removed
+ * chore, or a slot cut from "2 a day" to "1 a day", still appears wherever someone already did
+ * it, so editing the list never erases points earned. `activeSlots` is how many slots can still
+ * be claimed; rows past it exist only to show (and release) an old claim.
+ */
+export function dailyFor(chores, day) {
+  const claimed = (day && day.claimed) || {};
+  const out = [];
+  for (const c of chores) {
+    let last = -1;
+    for (const slot of Object.keys(claimed)) {
+      if (!slot.startsWith(`${c.id}#`)) continue;
+      const i = Number(slot.slice(c.id.length + 1));
+      if (Number.isInteger(i) && i > last) last = i;
+    }
+    const activeSlots = c.archived ? 0 : c.slotsPerDay;
+    if (activeSlots === 0 && last < 0) continue;
+    out.push({ ...c, slotsPerDay: Math.max(activeSlots, last + 1), activeSlots });
+  }
+  return out;
+}
+
 /** Every chore that can score on a day: scheduled ones first, then the everyday list. */
-export function choresForDay(daily, schedules, key, day) {
-  return [...scheduledFor(schedules, key, day), ...daily];
+export function choresForDay(chores, schedules, key, day) {
+  return [...scheduledFor(schedules, key, day), ...dailyFor(chores, day)];
 }

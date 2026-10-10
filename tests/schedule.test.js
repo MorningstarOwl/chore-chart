@@ -1,7 +1,7 @@
 // Repeating chores: when rules fall, how they read, and which chores a day carries.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { occursOn, nextOccurrence, describeRule, scheduledFor, choresForDay } from "../js/schedule.js";
+import { occursOn, nextOccurrence, describeRule, scheduledFor, choresForDay, dailyFor } from "../js/schedule.js";
 import { addDays } from "../js/calendar.js";
 
 const days = (rule, from, n) => {
@@ -112,5 +112,35 @@ describe("scheduledFor / choresForDay", () => {
     const moved = { ...trash, rule: { ...trash.rule, weekdays: [3] } };
     const chores = choresForDay(daily, [moved], "2026-10-13", { claimed: { "sched:s-1#0": "alex" } });
     assert.deepEqual(chores.map((c) => c.id), ["sched:s-1", "dishes"]);
+  });
+});
+
+describe("dailyFor", () => {
+  const list = [
+    { id: "dishes", name: "Dishes", points: 1, slotsPerDay: 1, archived: false },
+    { id: "pets", name: "Feed pets", points: 1, slotsPerDay: 1, archived: false }, // was 2 a day
+    { id: "gone", name: "Old chore", points: 2, slotsPerDay: 1, archived: true },
+  ];
+
+  it("lists current chores and hides removed ones nobody did", () => {
+    assert.deepEqual(dailyFor(list, { claimed: {} }).map((c) => c.id), ["dishes", "pets"]);
+  });
+
+  it("keeps a removed chore on days it was done, with no open slots", () => {
+    const out = dailyFor(list, { claimed: { "gone#0": "alex" } });
+    const gone = out.find((c) => c.id === "gone");
+    assert.equal(gone.slotsPerDay, 1);
+    assert.equal(gone.activeSlots, 0);
+  });
+
+  it("keeps a slot that was cut, where it had been claimed", () => {
+    const pets = dailyFor(list, { claimed: { "pets#1": "sam" } }).find((c) => c.id === "pets");
+    assert.equal(pets.slotsPerDay, 2);
+    assert.equal(pets.activeSlots, 1);
+  });
+
+  it("so totals still count points earned before an edit", () => {
+    const chores = choresForDay(list, [], "2026-10-13", { claimed: { "gone#0": "alex", "pets#1": "sam" } });
+    assert.deepEqual(chores.map((c) => c.id), ["dishes", "pets", "gone"]);
   });
 });

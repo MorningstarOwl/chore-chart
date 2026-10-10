@@ -1,28 +1,5 @@
-// config.js - loads and validates JSON catalog files; exposes catalogFeasibility().
+// config.js - validates chore/participant lists and checks the chore list covers everyone's goals.
 // No runtime deps. ES module.
-
-async function fetchSafe(path) {
-  const res = await fetch(path, { cache: "no-store" });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Failed to fetch ${path}: ${res.status} ${res.statusText}${text ? ` -- ${text}` : ""}`);
-  }
-  return res.json();
-}
-
-async function loadCatalogs() {
-  const data = await Promise.all([
-    fetchSafe("config/participants.json"),
-    fetchSafe("config/chores.json"),
-  ]);
-  const participantsData = data[0];
-  const choreData = data[1];
-
-  const participants = validateParticipants(participantsData);
-  const chores = validateChores(choreData);
-
-  return { participants, chores };
-}
 
 function validateParticipants(data) {
   if (!data || typeof data !== "object") {
@@ -103,4 +80,4 @@ function catalogFeasibility(choreList, participants) {
   };
 }
 
-export { loadCatalogs, validateParticipants, validateChores, catalogFeasibility, catalogTotal };
+export { validateParticipants, validateChores, catalogFeasibility, catalogTotal };

@@ -1,9 +1,9 @@
-import { loadCatalogs, catalogFeasibility } from "./config.js";
-import { fetchDay, fetchRange, sendOp, fetchHousehold, savePerson, saveSchedule, fetchIcons, ConflictError } from "./api.js";
+import { catalogFeasibility } from "./config.js";
+import { fetchDay, fetchRange, sendOp, fetchHousehold, savePerson, saveSchedule, saveChore, orderChores, fetchIcons, ConflictError } from "./api.js";
 import { toKey, isKey, addDays, weekStart, weekDays, monthOf, addMonths, monthGrid, monthDays, periodTotals } from "./calendar.js";
-import { scheduledFor, choresForDay } from "./schedule.js";
+import { scheduledFor, choresForDay, dailyFor } from "./schedule.js";
 import { renderScoreboard, renderWeek, renderMonth, renderDay, longDate, shortDate, monthName } from "./views.js";
-import { renderPeople, renderSchedule, settingsBusy } from "./settings.js";
+import { renderPeople, renderChores, settingsBusy } from "./settings.js";
 
 const POLL_MS = 10000;
 const $ = (id) => document.getElementById(id);
@@ -15,20 +15,21 @@ function showFailure(message) {
   banner.classList.toggle("banner--hidden", !message);
 }
 
-/** "#month/2026-10" (default), "#week/2026-10-04", "#day/2026-10-09", "#people", "#schedule". */
+/** "#month/2026-10" (default), "#week/2026-10-04", "#day/2026-10-09", "#people", "#chores" ("#schedule" still works). */
 function parseRoute() {
   const [view, arg] = location.hash.replace(/^#\/?/, "").split("/");
   const t = today();
   if (view === "week") return { view, key: weekStart(isKey(arg) ? arg : t) };
   if (view === "day") return { view, key: isKey(arg) ? arg : t };
-  if (view === "people" || view === "schedule") return { view };
+  if (view === "people") return { view };
+  if (view === "chores" || view === "schedule") return { view: "chores" };
   return { view: "month", month: /^\d{4}-\d{2}$/.test(arg || "") ? arg : monthOf(t) };
 }
 
 async function init() {
-  let dailyChores, icons, household;
+  let icons, household;
   try {
-    [{ chores: dailyChores }, icons, household] = await Promise.all([loadCatalogs(), fetchIcons(), fetchHousehold()]);
+    [icons, household] = await Promise.all([fetchIcons(), fetchHousehold()]);
   } catch (err) {
     showFailure(`Failed to load the chore chart: ${err && err.message}`);
     throw err;
@@ -42,12 +43,13 @@ async function init() {
   const active = () => household.people.filter((p) => !p.archived);
   const who = () => Object.fromEntries(household.people.map((p) => [p.id, p]));
   const schedFor = (key, day) => scheduledFor(household.schedules, key, day);
-  const choresFor = (key) => choresForDay(dailyChores, household.schedules, key, daysMap[key]);
+  const choresFor = (key) => choresForDay(household.chores, household.schedules, key, daysMap[key]);
+  const dailyOf = (day) => dailyFor(household.chores, day);
 
   function setHousehold(next) {
     household = next;
     const people = active();
-    const feas = catalogFeasibility(dailyChores, people);
+    const feas = catalogFeasibility(household.chores.filter((c) => !c.archived), people);
     $("banner-warn").textContent = feas.ok ? "" : `Heads up: the everyday chores add up to ${feas.catalogTotal} points, short of the ${feas.required} needed for everyone to reach their daily goals with some room to spare.`;
     $("banner-warn").classList.toggle("banner--hidden", feas.ok);
   }
@@ -55,7 +57,7 @@ async function init() {
 
   function setNav(route, { prev, next, todayHref, label }) {
     const calendar = route.view === "month" || route.view === "week" || route.view === "day";
-    for (const v of ["month", "week", "people", "schedule"]) {
+    for (const v of ["month", "week", "people", "chores"]) {
       $(`tab-${v}`).setAttribute("aria-current", route.view === v ? "page" : "false");
     }
     $("tab-month").href = route.view === "day" ? `#month/${monthOf(route.key)}` : "#month";
@@ -89,16 +91,16 @@ async function init() {
       setNav(route, { prev: `#week/${addDays(route.key, -7)}`, next: `#week/${addDays(route.key, 7)}`, todayHref: "#week", label: `${shortDate(keys[0])} – ${shortDate(keys[6])}` });
       const totals = periodTotals(choresFor, people, daysMap, keys, t);
       renderScoreboard($("scoreboard"), { people, totals, mode: "period", caption: "This week's totals" });
-      renderWeek(view, { keys, todayKey: t, people, who: who(), daysMap, totals, dailyChores, scheduledFor: schedFor });
+      renderWeek(view, { keys, todayKey: t, people, who: who(), daysMap, totals, dailyFor: dailyOf, scheduledFor: schedFor });
     } else if (route.view === "day") {
       const key = route.key;
       // Until the day's own fetch lands, show what the calendar already knows (undo stays off).
       const day = dayDetail.key === key ? dayDetail.data : { claimed: daysMap[key]?.claimed || {}, log: [] };
       setNav(route, { prev: `#day/${addDays(key, -1)}`, next: `#day/${addDays(key, 1)}`, todayHref: "#day", label: key === t ? `Today · ${longDate(key)}` : longDate(key) });
-      const totals = periodTotals(() => choresForDay(dailyChores, household.schedules, key, day), people, { [key]: day }, [key], t);
+      const totals = periodTotals(() => choresForDay(household.chores, household.schedules, key, day), people, { [key]: day }, [key], t);
       renderScoreboard($("scoreboard"), { people, totals, mode: "day", caption: "Points for this day" });
       renderDay(view, {
-        key, todayKey: t, dailyChores, scheduled: schedFor(key, day), people, who: who(), day,
+        key, todayKey: t, daily: dailyOf(day), scheduled: schedFor(key, day), people, who: who(), day,
         onToggle: (slotId, pid, on) => act(key, on ? "claim" : "release", slotId, pid),
         onUndo: () => act(key, "undo"),
         onReset: () => {
@@ -113,10 +115,12 @@ async function init() {
         onError: (msg) => showFailure(`Couldn't save: ${msg}`),
       });
     } else {
-      setNav(route, { label: "Scheduled chores" });
-      renderSchedule(view, {
+      setNav(route, { label: "Chores" });
+      renderChores(view, {
         household, icons, todayKey: t,
         onSave: async (id, fields) => { setHousehold(await saveSchedule(id, fields)); draw(); },
+        onSaveChore: async (id, fields) => { setHousehold(await saveChore(id, fields)); draw(); },
+        onOrder: async (ids) => { setHousehold(await orderChores(ids)); draw(); },
         onError: (msg) => showFailure(`Couldn't save: ${msg}`),
         redraw: draw,
       });

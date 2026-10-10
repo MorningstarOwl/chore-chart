@@ -181,6 +181,44 @@ class ServerTest(unittest.TestCase):
         path.write_text(json.dumps({"people": [{"id": "x", "name": "X", "color": "#123456", "icon": "🦔"}], "schedules": []}))
         self.assertEqual(server.Store(self.tmp.name).household()["people"][0]["goal"], 5)
 
+    def test_everyday_chores_seeded_and_migrated(self):
+        chores = self.call("/api/household")[1]["chores"]
+        self.assertEqual(len(chores), 24)
+        self.assertEqual(chores[0], {"id": "laundry-wash", "name": "Laundry - wash & dry", "icon": None,
+                                     "points": 2, "slotsPerDay": 1, "archived": False})
+        # A household saved before the chore editor picks up the config list, ids unchanged.
+        path = Path(self.tmp.name) / "household.json"
+        house = json.loads(path.read_text())
+        del house["chores"]
+        path.write_text(json.dumps(house))
+        self.assertEqual(server.Store(self.tmp.name).household()["chores"][0]["id"], "laundry-wash")
+
+    def test_everyday_chores_add_edit_remove(self):
+        house = self.call("/api/chores", {"name": "Walk the dog", "icon": "🐾", "points": 2, "slotsPerDay": 2})[1]
+        dog = house["chores"][-1]
+        self.assertEqual((dog["name"], dog["icon"], dog["points"], dog["slotsPerDay"]), ("Walk the dog", "🐾", 2, 2))
+        self.assertEqual(self.op(op="claim", slotId=f"{dog['id']}#1", participantId="sam")[0], 200)
+        self.call(f"/api/chores/{dog['id']}", {"slotsPerDay": 1, "icon": None})
+        self.assertEqual(self.op(op="claim", slotId=f"{dog['id']}#1", participantId="alex")[0], 400)  # slot gone
+        # The earlier claim on the removed slot stays recorded (so its points count) and can still be released.
+        self.assertEqual(self.call(f"/api/day/{DAY}")[1]["claimed"][f"{dog['id']}#1"], "sam")
+        self.assertEqual(self.op(op="release", slotId=f"{dog['id']}#1")[0], 200)
+        self.call("/api/chores/trash", {"archived": True})
+        self.assertEqual(self.op(op="claim", slotId="trash#0", participantId="alex")[0], 400)
+        self.assertTrue(next(c for c in self.call("/api/household")[1]["chores"] if c["id"] == "trash")["archived"])
+        self.call("/api/chores/trash", {"archived": False})
+        self.assertEqual(self.op(op="claim", slotId="trash#0", participantId="alex")[0], 200)
+
+    def test_everyday_chore_validation_and_order(self):
+        for bad in ({"name": "", "points": 1}, {"name": "x", "points": 0}, {"name": "x", "points": 11},
+                    {"name": "x", "points": 1, "slotsPerDay": 5}, {"name": "x", "points": 1, "icon": "<b>"}):
+            self.assertEqual(self.call("/api/chores", bad)[0], 400, bad)
+        self.assertEqual(self.call("/api/chores/nope", {"points": 2})[0], 404)
+        ids = [c["id"] for c in self.call("/api/household")[1]["chores"]]
+        status, house = self.call("/api/chore-order", {"ids": ids[::-1]})
+        self.assertEqual([c["id"] for c in house["chores"]], ids[::-1])
+        self.assertEqual(self.call("/api/chore-order", {"ids": ids[:-1]})[0], 400)
+
     def test_last_person_cannot_be_removed(self):
         for pid in ("alex", "sam", "riley"):
             self.assertEqual(self.call(f"/api/people/{pid}", {"archived": True})[0], 200)
@@ -249,8 +287,12 @@ class ServerTest(unittest.TestCase):
                 # icons.json is not in the override folder, so the bundled one is served.
                 with urllib.request.urlopen(self.base + "/config/icons.json") as r:
                     self.assertIn("groups", json.loads(r.read()))
-                self.assertEqual(self.op(op="claim", slotId="walk-dog#0", participantId="alex")[0], 200)
-                self.assertEqual(self.op(op="claim", slotId="trash#0", participantId="alex")[0], 400)
+                # chores.json seeds a brand-new household only.
+                with tempfile.TemporaryDirectory() as fresh:
+                    server.Handler.store = server.Store(fresh)
+                    self.assertEqual([c["id"] for c in self.call("/api/household")[1]["chores"]], ["walk-dog"])
+                    self.assertEqual(self.op(op="claim", slotId="walk-dog#0", participantId="alex")[0], 200)
+                    self.assertEqual(self.op(op="claim", slotId="trash#0", participantId="alex")[0], 400)
 
     def test_https_origin_and_trusted_origins_may_write(self):
         host = f"127.0.0.1:{self.srv.server_port}"

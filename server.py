@@ -14,7 +14,8 @@ Settings (flags win over environment variables):
   CHORE_TITLE                  page title (default "Chore Chart")
   CHORE_CONFIG_DIR             folder whose chores.json / participants.json / icons.json
                                replace the bundled ones in config/ (any file left out
-                               falls back to the bundled copy)
+                               falls back to the bundled copy). chores.json and
+                               participants.json only seed a brand-new household.
   CHORE_TRUSTED_ORIGINS        extra comma-separated origins allowed to write, for a reverse
                                proxy that changes the Host header (the page's own http/https
                                origin is always allowed)
@@ -26,9 +27,12 @@ API (all JSON):
   POST /api/day/YYYY-MM-DD   body {"op": "claim"|"release"|"clear"|"undo", "slotId", "participantId"}
                              -> the updated day; 409 if the op no longer applies (someone beat you to it).
                              Claims on days after tomorrow (server time) are refused: chores are logged, not planned.
-  GET  /api/household        -> {"people": [...], "schedules": [...]} (archived entries included)
+  GET  /api/household        -> {"people": [...], "chores": [...], "schedules": [...]} (archived entries included)
   POST /api/people           body {"name", "color", "icon", "goal"?} -> household; adds a person (goal 1-20, default 5)
   POST /api/people/ID        body with any of name/color/icon/goal/archived -> household
+  POST /api/chores           body {"name", "icon"?, "points", "slotsPerDay"} -> household; adds an everyday chore
+  POST /api/chores/ID        body with any of name/icon/points/slotsPerDay/archived -> household
+  POST /api/chore-order      body {"ids": [...]} -> household; the everyday list in this order
   POST /api/schedules        body {"name", "icon", "points", "assignee", "rule"} -> household
   POST /api/schedules/ID     body with any schedule field, or {"archived": true} -> household
   GET  /api/export           -> every stored day plus the household, as a download (backup)
@@ -88,12 +92,6 @@ class OpError(Exception):
     """An op that cannot apply to the current state (stale client): HTTP 409."""
 
 
-def daily_slots():
-    """Slot ids of the everyday chores, read fresh so config edits apply without a restart."""
-    chores = json.loads(config_path("chores.json").read_text())["chores"]
-    return {f"{c['id']}#{i}" for c in chores for i in range(int(c["slotsPerDay"]))}
-
-
 def allowed_icons():
     groups = json.loads(config_path("icons.json").read_text())["groups"]
     return {icon for g in groups for icon in g["icons"]}
@@ -149,6 +147,36 @@ def check_person(body, current=None):
         out["goal"] = _int(body.get("goal", DEFAULT_GOAL), "daily goal", 1, 20)
     if "archived" in body:
         out["archived"] = bool(body["archived"])
+    return out
+
+
+def check_chore(body, current=None):
+    """An everyday chore. icon is optional (None = no icon)."""
+    out = dict(current or {})
+    if "name" in body or current is None:
+        out["name"] = _text(body.get("name"), "name", 40)
+    if "icon" in body or current is None:
+        icon = body.get("icon") or None
+        if icon is not None and icon not in allowed_icons():
+            raise ValueError("pick an icon from the menu")
+        out["icon"] = icon
+    if "points" in body or current is None:
+        out["points"] = _int(body.get("points"), "points", 1, 10)
+    if "slotsPerDay" in body or current is None:
+        out["slotsPerDay"] = _int(body.get("slotsPerDay", 1), "times per day", 1, 4)
+    if "archived" in body:
+        out["archived"] = bool(body["archived"])
+    return out
+
+
+def seed_chores():
+    """The starting everyday list, from config/chores.json (or $CHORE_CONFIG_DIR/chores.json)."""
+    out = []
+    for c in json.loads(config_path("chores.json").read_text())["chores"]:
+        try:
+            out.append({"id": c["id"], **check_chore({**c, "icon": c.get("icon")}), "archived": False})
+        except (KeyError, ValueError, TypeError) as err:
+            print(f"chores.json: skipping {c!r}: {err}", flush=True)
     return out
 
 
@@ -272,7 +300,7 @@ class Store:
         seed = json.loads(config_path("participants.json").read_text())["participants"]
         people = [{"id": p["id"], "name": p["name"], "color": p.get("color") or SEED_COLORS[i % len(SEED_COLORS)],
                    "icon": SEED_ICONS[i % len(SEED_ICONS)], "goal": DEFAULT_GOAL} for i, p in enumerate(seed)]
-        house = {"people": people, "schedules": []}
+        house = {"people": people, "chores": seed_chores(), "schedules": []}
         write_json(self.house_path, house)
         return house
 
@@ -302,7 +330,16 @@ class Store:
                 if body.get("assignee") not in active:
                     body["assignee"] = None
                 schedules.append({"id": sch["id"], **check_schedule(body, active), "archived": bool(sch.get("archived"))})
-        return {"people": people, "schedules": schedules}
+        if raw.get("chores") is None:
+            # Households from before the chore editor: their list was config/chores.json.
+            chores = seed_chores()
+        else:
+            chores = []
+            for c in raw["chores"]:
+                if isinstance(c, dict) and isinstance(c.get("id"), str):
+                    body = {**c, "icon": c.get("icon") if c.get("icon") in icons else None}
+                    chores.append({"id": c["id"], **check_chore(body), "archived": bool(c.get("archived"))})
+        return {"people": people, "chores": chores, "schedules": schedules}
 
     def household(self):
         with self.lock:
@@ -331,6 +368,33 @@ class Store:
                 for sch in self.house["schedules"]:
                     if sch.get("assignee") == pid:
                         sch["assignee"] = None
+            write_json(self.house_path, self.house)
+        return self.household()
+
+    def add_chore(self, body):
+        with self.lock:
+            chore = {"id": f"c-{secrets.token_hex(4)}", **check_chore(body), "archived": False}
+            self.house["chores"].append(chore)
+            write_json(self.house_path, self.house)
+        return self.household()
+
+    def update_chore(self, cid, body):
+        with self.lock:
+            chore = next((c for c in self.house["chores"] if c["id"] == cid), None)
+            if chore is None:
+                raise KeyError("no such chore")
+            chore.update(check_chore(body, chore))
+            write_json(self.house_path, self.house)
+        return self.household()
+
+    def order_chores(self, body):
+        ids = body.get("ids")
+        with self.lock:
+            current = [c["id"] for c in self.house["chores"]]
+            if not isinstance(ids, list) or sorted(ids) != sorted(current):
+                raise ValueError("ids must list every chore exactly once")
+            by_id = {c["id"]: c for c in self.house["chores"]}
+            self.house["chores"] = [by_id[i] for i in ids]
             write_json(self.house_path, self.house)
         return self.household()
 
@@ -381,8 +445,8 @@ class Store:
             tomorrow = datetime.date.today() + datetime.timedelta(days=1)
             if key > tomorrow.isoformat():
                 raise ValueError("can't log chores for a future day")
-        slots = daily_slots()
         with self.lock:
+            slots = {f"{c['id']}#{i}" for c in self.house["chores"] if not c.get("archived") for i in range(c["slotsPerDay"])}
             slots |= {f"sched:{x['id']}#0" for x in self.house["schedules"] if not x.get("archived")}
             people = self._active_people()
             day = clean_day(self.days.get(key))
@@ -496,11 +560,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"imported": self.store.replace(body)})
             if not isinstance(body, dict):
                 raise ValueError("expected a JSON object")
-            m = re.fullmatch(r"/api/(people|schedules)(?:/([\w-]{1,40}))?", self.path)
+            if self.path == "/api/chore-order":
+                return self._send(200, self.store.order_chores(body))
+            m = re.fullmatch(r"/api/(people|chores|schedules)(?:/([\w-]{1,40}))?", self.path)
             if m:
                 kind, ident = m.groups()
                 if kind == "people":
                     house = self.store.update_person(ident, body) if ident else self.store.add_person(body)
+                elif kind == "chores":
+                    house = self.store.update_chore(ident, body) if ident else self.store.add_chore(body)
                 else:
                     house = self.store.update_schedule(ident, body) if ident else self.store.add_schedule(body)
                 return self._send(200, house)
