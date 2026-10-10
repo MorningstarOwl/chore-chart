@@ -1,0 +1,21 @@
+# docker compose up -d   then open http://<this-machine>:8420/ on any device on your network.
+services:
+  chore-chart:
+    image: ghcr.io/morningstarowl/chore-chart:latest
+    # To build from this folder instead of pulling: comment out `image:` and uncomment `build:`.
+    # build: .
+    container_name: chore-chart
+    restart: unless-stopped
+    ports:
+      - "8420:8420"
+    environment:
+      TZ: America/New_York           # your time zone; days roll over at your midnight
+      CHORE_TITLE: "Our Chore Chart" # shown at the top of the page
+      # CHORE_CONFIG_DIR: /config    # use your own chores.json (see the volume below)
+      # CHORE_TRUSTED_ORIGINS: https://chores.example.com  # only behind a proxy that rewrites Host
+    volumes:
+      - chore-data:/data             # people, schedules and every logged chore
+      # - ./my-config:/config:ro     # your own chores.json / participants.json / icons.json
+
+volumes:
+  chore-data:

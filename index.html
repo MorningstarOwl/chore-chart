@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>{{title}}</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="banner-fail" class="banner banner--critical banner--hidden" role="alert"></div>
+      <div id="banner-warn" class="banner banner--warning banner--hidden" role="status"></div>
+
+      <header class="top">
+        <div class="top__title">
+          <h1>{{title}}</h1>
+          <p id="period-label" class="top__period" aria-live="polite"></p>
+        </div>
+        <nav class="top__nav" aria-label="Calendar">
+          <div class="seg">
+            <a id="tab-month" href="#month">Month</a>
+            <a id="tab-week" href="#week">Week</a>
+          </div>
+          <div class="stepper" id="stepper">
+            <a id="prev" href="#month" aria-label="Previous">‹</a>
+            <a id="today-link" href="#month">Today</a>
+            <a id="next" href="#month" aria-label="Next">›</a>
+          </div>
+          <div class="seg seg--menu">
+            <a id="tab-people" href="#people"><span aria-hidden="true">👥</span> People</a>
+            <a id="tab-schedule" href="#schedule"><span aria-hidden="true">📅</span> Schedule</a>
+          </div>
+        </nav>
+      </header>
+
+      <section id="scoreboard" class="scoreboard" aria-live="polite"></section>
+
+      <main id="view" class="view"></main>
+
+      <footer class="foot">
+        <a href="#day">Log today's chores</a> ·
+        <a href="api/export">Download a backup</a>
+      </footer>
+    </div>
+
+    <script type="module" src="js/main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,28 @@
+{
+  "chores": [
+    { "id": "laundry-wash",     "name": "Laundry - wash & dry",       "points": 2, "slotsPerDay": 1 },
+    { "id": "laundry-fold",     "name": "Fold & put away laundry",    "points": 2, "slotsPerDay": 1 },
+    { "id": "feed-pets",        "name": "Feed pets",                   "points": 1, "slotsPerDay": 2 },
+    { "id": "wash-dishes",      "name": "Wash dishes",                 "points": 1, "slotsPerDay": 1 },
+    { "id": "dishwasher",       "name": "Load / unload dishwasher",    "points": 1, "slotsPerDay": 1 },
+    { "id": "tidy-lr",          "name": "Tidy living room",            "points": 1, "slotsPerDay": 1 },
+    { "id": "vacuum-hall",      "name": "Vacuum hallway",              "points": 1, "slotsPerDay": 1 },
+    { "id": "mop-kitchen",      "name": "Mop kitchen floor",           "points": 1, "slotsPerDay": 1 },
+    { "id": "recycle",          "name": "Recycling bin",               "points": 1, "slotsPerDay": 1 },
+    { "id": "bathroom-rinse",   "name": "Bathroom sink rinse",         "points": 1, "slotsPerDay": 1 },
+    { "id": "tidy-bedroom",     "name": "Tidy bedroom",                "points": 1, "slotsPerDay": 1 },
+    { "id": "water-plants",     "name": "Water plants",                "points": 1, "slotsPerDay": 1 },
+    { "id": "trash",            "name": "Take out trash",              "points": 1, "slotsPerDay": 1 },
+    { "id": "wipe-counters",    "name": "Wipe counters",               "points": 1, "slotsPerDay": 1 },
+    { "id": "microwave",        "name": "Clean microwave",             "points": 1, "slotsPerDay": 1 },
+    { "id": "bed-linen",        "name": "Change bed linens",           "points": 2, "slotsPerDay": 1 },
+    { "id": "dust-table",       "name": "Dust furniture",              "points": 1, "slotsPerDay": 1 },
+    { "id": "sweep-lr",         "name": "Sweep living room rug",       "points": 1, "slotsPerDay": 1 },
+    { "id": "sort-mail",        "name": "Sort & file mail",             "points": 1, "slotsPerDay": 1 },
+    { "id": "sweep-bath",       "name": "Sweep bathroom floor",        "points": 1, "slotsPerDay": 1 },
+    { "id": "wipe-desk",        "name": "Wipe shared desk",             "points": 1, "slotsPerDay": 1 },
+    { "id": "vacuum-guest",     "name": "Vacuum guest room",            "points": 1, "slotsPerDay": 1 },
+    { "id": "organize-shelves", "name": "Organize shelves",             "points": 1, "slotsPerDay": 1 },
+    { "id": "reorganize-kids",  "name": "Organize kids stuff",          "points": 2, "slotsPerDay": 1 }
+  ]
+}

@@ -1,0 +1,7 @@
+# Only server.py, index.html, styles.css, js/ and config/ go into the image.
+*
+!server.py
+!index.html
+!styles.css
+!js/
+!config/

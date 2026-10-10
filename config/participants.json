@@ -1,0 +1,8 @@
+{
+  "participants": [
+    { "id": "alex", "name": "Alex" },
+    { "id": "sam", "name": "Sam" },
+    { "id": "riley", "name": "Riley" },
+    { "id": "jordan", "name": "Jordan" }
+  ]
+}
