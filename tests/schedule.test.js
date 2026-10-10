@@ -1,7 +1,7 @@
 // Repeating chores: when rules fall, how they read, and which chores a day carries.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { occursOn, nextOccurrence, describeRule, scheduledFor, choresForDay, dailyFor } from "../js/schedule.js";
+import { occursOn, nextOccurrence, previousOccurrence, overdueSince, describeRule, scheduledFor, choresForDay, dailyFor } from "../js/schedule.js";
 import { addDays } from "../js/calendar.js";
 
 const days = (rule, from, n) => {
@@ -65,6 +65,70 @@ describe("monthly rules", () => {
   });
 });
 
+describe("yearly rules", () => {
+  it("fall on the same date each year", () => {
+    const rule = { type: "yearly", month: 3, day: 15, start: "2026-01-01" };
+    assert.deepEqual([nextOccurrence(rule, "2026-10-10"), nextOccurrence(rule, "2027-03-16")], ["2027-03-15", "2028-03-15"]);
+  });
+  it("Feb 29 falls on Feb 28 in other years", () => {
+    const rule = { type: "yearly", month: 2, day: 29, start: "2026-01-01" };
+    assert.equal(nextOccurrence(rule, "2026-01-01"), "2026-02-28");
+    assert.equal(nextOccurrence(rule, "2028-01-01"), "2028-02-29");
+  });
+});
+
+describe("every-N-days rules", () => {
+  it("fixed: every 90 days from the start, ignoring when it was done", () => {
+    const rule = { type: "interval", days: 90, fromLastDone: false, start: "2026-10-01" };
+    assert.deepEqual(days(rule, "2026-09-01", 230), ["2026-10-01", "2026-12-30", "2027-03-30"]);
+    assert.equal(occursOn(rule, "2026-12-30", "2026-10-20"), true);
+  });
+
+  it("from last done: the count restarts at the day it was done", () => {
+    const rule = { type: "interval", days: 90, fromLastDone: true, start: "2026-10-01" };
+    // Never done yet: first due on the start date, then every 90 days.
+    assert.equal(nextOccurrence(rule, "2026-09-01", undefined), "2026-10-01");
+    // Done 10 days late, on Oct 11: next due 90 days later, Jan 9.
+    assert.equal(nextOccurrence(rule, "2026-10-12", "2026-10-11"), "2027-01-09");
+    assert.equal(occursOn(rule, "2026-12-30", "2026-10-11"), false);
+  });
+
+  it("from last done: a completion before the start date is ignored", () => {
+    const rule = { type: "interval", days: 30, fromLastDone: true, start: "2026-10-01" };
+    assert.equal(nextOccurrence(rule, "2026-09-01", "2026-08-01"), "2026-10-01");
+  });
+});
+
+describe("keep it on the list until it's done", () => {
+  const filter = { id: "f", name: "Furnace filter", icon: "🔧", points: 2, assignee: null, carryOver: true,
+    rule: { type: "interval", days: 90, fromLastDone: true, start: "2026-10-01" } };
+
+  it("is owed from its due date until someone does it", () => {
+    assert.equal(overdueSince(filter, "2026-10-01", undefined), null); // due today, not overdue yet
+    assert.equal(overdueSince(filter, "2026-10-05", undefined), "2026-10-01");
+    assert.equal(overdueSince(filter, "2026-10-05", "2026-10-04"), null); // done on the 4th
+  });
+
+  it("shows up on today's list only, marked with the date it was due", () => {
+    const today = "2026-10-05";
+    const out = scheduledFor([filter], today, { claimed: {} }, { today, lastDone: {} });
+    assert.equal(out.length, 1);
+    assert.equal(out[0].overdueSince, "2026-10-01");
+    assert.deepEqual(scheduledFor([filter], "2026-10-03", { claimed: {} }, { today, lastDone: {} }), []);
+  });
+
+  it("does nothing for chores without the setting", () => {
+    const trash = { ...filter, carryOver: false, rule: { type: "weekly", every: 1, weekdays: [2], start: "2026-10-01" } };
+    assert.equal(overdueSince(trash, "2026-10-08", undefined), null);
+  });
+
+  it("previousOccurrence looks back from a day", () => {
+    const rule = { type: "weekly", every: 1, weekdays: [2], start: "2026-10-01" };
+    assert.equal(previousOccurrence(rule, "2026-10-12"), "2026-10-06");
+    assert.equal(previousOccurrence(rule, "2026-10-05"), null);
+  });
+});
+
 describe("nextOccurrence", () => {
   it("finds the next date on or after a day", () => {
     const rule = { type: "weekly", every: 1, weekdays: [2], start: "2026-01-01" };
@@ -89,6 +153,10 @@ describe("describeRule", () => {
     [{ type: "monthly-day", every: 1, day: 15 }, "On the 15th of every month"],
     [{ type: "monthly-day", every: 3, day: 31 }, "On the 31st of every 3 months (or the last day)"],
     [{ type: "monthly-day", every: 12, day: 1 }, "On the 1st of every year"],
+    [{ type: "monthly-day", every: 3, day: 1 }, "On the 1st of every 3 months"],
+    [{ type: "yearly", month: 3, day: 15 }, "Every year on March 15"],
+    [{ type: "interval", days: 90, fromLastDone: false }, "Every 90 days"],
+    [{ type: "interval", days: 90, fromLastDone: true }, "Every 90 days, counted from when it was last done"],
   ];
   for (const [rule, text] of cases) it(text, () => assert.equal(describeRule(rule), text));
 });

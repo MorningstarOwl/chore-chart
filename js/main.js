@@ -42,8 +42,10 @@ async function init() {
 
   const active = () => household.people.filter((p) => !p.archived);
   const who = () => Object.fromEntries(household.people.map((p) => [p.id, p]));
-  const schedFor = (key, day) => scheduledFor(household.schedules, key, day);
-  const choresFor = (key) => choresForDay(household.chores, household.schedules, key, daysMap[key]);
+  // lastDone places "every N days from the last time" dates and keeps overdue chores on today's list.
+  const history = () => ({ today: today(), lastDone: household.lastDone || {} });
+  const schedFor = (key, day) => scheduledFor(household.schedules, key, day, history());
+  const choresFor = (key) => choresForDay(household.chores, household.schedules, key, daysMap[key], history());
   const dailyOf = (day) => dailyFor(household.chores, day);
 
   function setHousehold(next) {
@@ -85,19 +87,19 @@ async function init() {
       const totals = periodTotals(choresFor, people, daysMap, keys, t);
       const monthTotals = periodTotals(choresFor, people, daysMap, monthDays(route.month), t);
       renderScoreboard($("scoreboard"), { people, totals: monthTotals, mode: "period", caption: "This month's totals" });
-      renderMonth(view, { month: route.month, keys, todayKey: t, people, who: who(), daysMap, totals, scheduledFor: schedFor });
+      renderMonth(view, { month: route.month, keys, todayKey: t, people, who: who(), daysMap, totals, scheduledFor: schedFor, lastDone: household.lastDone });
     } else if (route.view === "week") {
       const keys = weekDays(route.key);
       setNav(route, { prev: `#week/${addDays(route.key, -7)}`, next: `#week/${addDays(route.key, 7)}`, todayHref: "#week", label: `${shortDate(keys[0])} – ${shortDate(keys[6])}` });
       const totals = periodTotals(choresFor, people, daysMap, keys, t);
       renderScoreboard($("scoreboard"), { people, totals, mode: "period", caption: "This week's totals" });
-      renderWeek(view, { keys, todayKey: t, people, who: who(), daysMap, totals, dailyFor: dailyOf, scheduledFor: schedFor });
+      renderWeek(view, { keys, todayKey: t, people, who: who(), daysMap, totals, dailyFor: dailyOf, scheduledFor: schedFor, lastDone: household.lastDone });
     } else if (route.view === "day") {
       const key = route.key;
       // Until the day's own fetch lands, show what the calendar already knows (undo stays off).
       const day = dayDetail.key === key ? dayDetail.data : { claimed: daysMap[key]?.claimed || {}, log: [] };
       setNav(route, { prev: `#day/${addDays(key, -1)}`, next: `#day/${addDays(key, 1)}`, todayHref: "#day", label: key === t ? `Today · ${longDate(key)}` : longDate(key) });
-      const totals = periodTotals(() => choresForDay(household.chores, household.schedules, key, day), people, { [key]: day }, [key], t);
+      const totals = periodTotals(() => choresForDay(household.chores, household.schedules, key, day, history()), people, { [key]: day }, [key], t);
       renderScoreboard($("scoreboard"), { people, totals, mode: "day", caption: "Points for this day" });
       renderDay(view, {
         key, todayKey: t, daily: dailyOf(day), scheduled: schedFor(key, day), people, who: who(), day,

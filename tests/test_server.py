@@ -251,6 +251,34 @@ class ServerTest(unittest.TestCase):
                        {"rule": {"type": "yearly", "start": "2026-10-01"}}):
             self.assertEqual(self.call("/api/schedules", {**good, **change})[0], 400, change)
 
+    def test_yearly_and_interval_rules_and_last_done(self):
+        yearly = {"name": "Test smoke alarms", "icon": "🧯", "points": 2, "assignee": None, "carryOver": True,
+                  "rule": {"type": "yearly", "month": 3, "day": 15, "start": "2026-01-01"}}
+        filt = {"name": "Furnace filter", "icon": "🔧", "points": 3, "assignee": None, "carryOver": True,
+                "rule": {"type": "interval", "days": 90, "fromLastDone": True, "start": "2026-10-01"}}
+        self.assertEqual(self.call("/api/schedules", yearly)[0], 200)
+        house = self.call("/api/schedules", filt)[1]
+        sid = house["schedules"][-1]["id"]
+        self.assertEqual(house["schedules"][-1]["rule"], filt["rule"])
+        self.assertTrue(house["schedules"][-1]["carryOver"])
+        self.assertEqual(house["lastDone"], {})
+        self.call("/api/day/2026-10-03", {"op": "claim", "slotId": f"sched:{sid}#0", "participantId": "alex"})
+        self.call("/api/day/2026-10-01", {"op": "claim", "slotId": f"sched:{sid}#0", "participantId": "sam"})
+        self.assertEqual(self.call("/api/household")[1]["lastDone"], {sid: "2026-10-03"})
+        for bad in ({"type": "yearly", "month": 13, "day": 1}, {"type": "yearly", "month": 2, "day": 0},
+                    {"type": "interval", "days": 1}, {"type": "interval", "days": 731}):
+            body = {**filt, "rule": {**bad, "start": "2026-10-01"}}
+            self.assertEqual(self.call("/api/schedules", body)[0], 400, bad)
+
+    def test_old_schedules_load_without_carry_over(self):
+        self.call("/api/schedules", {"name": "Trash", "icon": "🗑️", "points": 1, "assignee": None,
+                                     "rule": {"type": "weekly", "every": 1, "weekdays": [2], "start": "2026-10-01"}})
+        path = Path(self.tmp.name) / "household.json"
+        house = json.loads(path.read_text())
+        del house["schedules"][0]["carryOver"]
+        path.write_text(json.dumps(house))
+        self.assertFalse(server.Store(self.tmp.name).household()["schedules"][0]["carryOver"])
+
     def test_household_survives_restart_and_backup(self):
         self.call("/api/people", {"name": "Willow", "color": "#123456", "icon": "🦔"})
         self.assertEqual(server.Store(self.tmp.name).household()["people"][-1]["name"], "Willow")

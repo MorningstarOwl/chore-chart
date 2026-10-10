@@ -4,11 +4,18 @@
 //   {type: "weekly",      every: 1-8 weeks,   weekdays: [0-6]}   0 = Sunday
 //   {type: "monthly-day", every: 1-12 months, day: 1-31}         31 means "or the last day"
 //   {type: "monthly-nth", every: 1-12 months, nth: 1-4 | -1, weekday: 0-6}   -1 = last
+//   {type: "yearly",      month: 1-12, day: 1-31}                Feb 29 falls on Feb 28 in other years
+//   {type: "interval",    days: 2-730, fromLastDone: bool}       every N days; with fromLastDone the
+//                                                                count restarts whenever it is done
+//
+// `history` = {lastDone: {scheduleId: "YYYY-MM-DD"}} from the server. Only "interval" rules
+// with fromLastDone need it to place dates; the carry-over below needs it for every rule.
 
 import { fromKey, addDays, weekStart } from "./calendar.js";
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const NTH = { 1: "1st", 2: "2nd", 3: "3rd", 4: "4th", "-1": "last" };
+export const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 function dayNumber(key) {
   const [y, m, d] = key.split("-").map(Number);
@@ -19,9 +26,26 @@ function daysInMonth(y, m0) {
   return new Date(y, m0 + 1, 0).getDate();
 }
 
-export function occursOn(rule, key) {
+function daysBetween(a, b) {
+  return dayNumber(b) - dayNumber(a);
+}
+
+/** The first due date of an interval rule: the start, or N days after it was last done. */
+function intervalFirst(rule, lastDone) {
+  return rule.fromLastDone && lastDone && lastDone >= rule.start ? addDays(lastDone, rule.days) : rule.start;
+}
+
+export function occursOn(rule, key, lastDone) {
   if (!rule || key < rule.start) return false;
+  if (rule.type === "interval") {
+    const first = intervalFirst(rule, lastDone);
+    return key >= first && daysBetween(first, key) % rule.days === 0;
+  }
   const date = fromKey(key);
+  if (rule.type === "yearly") {
+    const last = daysInMonth(date.getFullYear(), rule.month - 1);
+    return date.getMonth() === rule.month - 1 && date.getDate() === Math.min(rule.day, last);
+  }
   const every = rule.every || 1;
   if (rule.type === "weekly") {
     if (!rule.weekdays.includes(date.getDay())) return false;
@@ -47,12 +71,32 @@ export function occursOn(rule, key) {
 }
 
 /** First day on or after fromKey that the rule falls on, or null within ~2 years. */
-export function nextOccurrence(rule, fromKey) {
+export function nextOccurrence(rule, fromKey, lastDone) {
   let key = fromKey < rule.start ? rule.start : fromKey;
   for (let i = 0; i < 800; i++, key = addDays(key, 1)) {
-    if (occursOn(rule, key)) return key;
+    if (occursOn(rule, key, lastDone)) return key;
   }
   return null;
+}
+
+/** Last day on or before key that the rule falls on, or null. */
+export function previousOccurrence(rule, key, lastDone) {
+  for (let i = 0; i < 800 && key >= rule.start; i++, key = addDays(key, -1)) {
+    if (occursOn(rule, key, lastDone)) return key;
+  }
+  return null;
+}
+
+/**
+ * For a chore kept on the list until it's done: the due date it is still owed for, as of
+ * `today`, or null when nothing is outstanding. Only the latest due date counts; a chore
+ * missed twice is owed once.
+ */
+export function overdueSince(schedule, today, lastDone) {
+  if (!schedule.carryOver || schedule.archived) return null;
+  const due = previousOccurrence(schedule.rule, addDays(today, -1), lastDone);
+  if (!due || (lastDone && lastDone >= due)) return null;
+  return due;
 }
 
 function ordinal(n) {
@@ -74,7 +118,13 @@ export function describeRule(rule) {
     if (every === 2) return `Every other ${days}`;
     return `Every ${every} weeks on ${days}`;
   }
-  const months = every === 1 ? "every month" : every === 12 ? "every year" : `every ${every} months`;
+  if (rule.type === "interval") {
+    return rule.fromLastDone ? `Every ${rule.days} days, counted from when it was last done` : `Every ${rule.days} days`;
+  }
+  if (rule.type === "yearly") {
+    return `Every year on ${MONTHS[rule.month - 1]} ${rule.day}`;
+  }
+  const months = every === 1 ? "every month" : every === 3 ? "every 3 months" : every === 12 ? "every year" : `every ${every} months`;
   if (rule.type === "monthly-day") {
     return `On the ${ordinal(rule.day)} of ${months}${rule.day > 28 ? " (or the last day)" : ""}`;
   }
@@ -86,19 +136,28 @@ export function describeRule(rule) {
 }
 
 /** A schedule as a chore the scoring code understands: one slot, id "sched:<id>". */
-export function scheduleChore(s) {
-  return { id: `sched:${s.id}`, name: s.name, points: s.points, slotsPerDay: 1, icon: s.icon, scheduled: true, assignee: s.assignee, schedule: s };
+export function scheduleChore(s, extra) {
+  return { id: `sched:${s.id}`, name: s.name, points: s.points, slotsPerDay: 1, icon: s.icon, scheduled: true, assignee: s.assignee, schedule: s, ...extra };
 }
 
 /**
  * Scheduled chores for a day: those whose rule falls on it, plus any already done that day
- * (so moving or deleting a schedule never erases points people earned).
+ * (so moving or deleting a schedule never erases points people earned). On `today`, a chore
+ * kept until done that is still owed from an earlier date is added with `overdueSince`.
  */
-export function scheduledFor(schedules, key, day) {
+export function scheduledFor(schedules, key, day, { today, lastDone = {} } = {}) {
   const claimed = (day && day.claimed) || {};
-  return schedules
-    .filter((s) => (!s.archived && occursOn(s.rule, key)) || claimed[`sched:${s.id}#0`])
-    .map(scheduleChore);
+  const out = [];
+  for (const s of schedules) {
+    const done = claimed[`sched:${s.id}#0`];
+    if (done || (!s.archived && occursOn(s.rule, key, lastDone[s.id]))) {
+      out.push(scheduleChore(s));
+    } else if (key === today) {
+      const since = overdueSince(s, today, lastDone[s.id]);
+      if (since) out.push(scheduleChore(s, { overdueSince: since }));
+    }
+  }
+  return out;
 }
 
 /**
@@ -125,6 +184,6 @@ export function dailyFor(chores, day) {
 }
 
 /** Every chore that can score on a day: scheduled ones first, then the everyday list. */
-export function choresForDay(chores, schedules, key, day) {
-  return [...scheduledFor(schedules, key, day), ...dailyFor(chores, day)];
+export function choresForDay(chores, schedules, key, day, history) {
+  return [...scheduledFor(schedules, key, day, history), ...dailyFor(chores, day)];
 }

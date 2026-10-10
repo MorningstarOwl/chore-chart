@@ -27,13 +27,16 @@ API (all JSON):
   POST /api/day/YYYY-MM-DD   body {"op": "claim"|"release"|"clear"|"undo", "slotId", "participantId"}
                              -> the updated day; 409 if the op no longer applies (someone beat you to it).
                              Claims on days after tomorrow (server time) are refused: chores are logged, not planned.
-  GET  /api/household        -> {"people": [...], "chores": [...], "schedules": [...]} (archived entries included)
+  GET  /api/household        -> {"people": [...], "chores": [...], "schedules": [...], "lastDone": {...}}
+                             (archived entries included; lastDone = latest day each schedule was done)
   POST /api/people           body {"name", "color", "icon", "goal"?} -> household; adds a person (goal 1-20, default 5)
   POST /api/people/ID        body with any of name/color/icon/goal/archived -> household
   POST /api/chores           body {"name", "icon"?, "points", "slotsPerDay"} -> household; adds an everyday chore
   POST /api/chores/ID        body with any of name/icon/points/slotsPerDay/archived -> household
   POST /api/chore-order      body {"ids": [...]} -> household; the everyday list in this order
-  POST /api/schedules        body {"name", "icon", "points", "assignee", "rule"} -> household
+  POST /api/schedules        body {"name", "icon", "points", "assignee", "rule", "carryOver"?} -> household
+                             rule types: weekly, monthly-day, monthly-nth, yearly, interval (see js/schedule.js);
+                             carryOver keeps a missed one on today's list until someone does it
   POST /api/schedules/ID     body with any schedule field, or {"archived": true} -> household
   GET  /api/export           -> every stored day plus the household, as a download (backup)
   POST /api/import           body = an export; replaces the stored days (and household, if present)
@@ -194,6 +197,12 @@ def check_rule(rule):
     elif kind == "monthly-day":
         out["every"] = _int(rule.get("every"), "every", 1, 12)
         out["day"] = _int(rule.get("day"), "day", 1, 31)
+    elif kind == "yearly":
+        out["month"] = _int(rule.get("month"), "month", 1, 12)
+        out["day"] = _int(rule.get("day"), "day", 1, 31)
+    elif kind == "interval":
+        out["days"] = _int(rule.get("days"), "number of days", 2, 730)
+        out["fromLastDone"] = bool(rule.get("fromLastDone"))
     elif kind == "monthly-nth":
         out["every"] = _int(rule.get("every"), "every", 1, 12)
         nth = rule.get("nth")
@@ -202,7 +211,7 @@ def check_rule(rule):
         out["nth"] = nth
         out["weekday"] = _int(rule.get("weekday"), "weekday", 0, 6)
     else:
-        raise ValueError("rule type must be weekly, monthly-day or monthly-nth")
+        raise ValueError("rule type must be weekly, monthly-day, monthly-nth, yearly or interval")
     return out
 
 
@@ -223,6 +232,8 @@ def check_schedule(body, active_people, current=None):
         out["assignee"] = who
     if "rule" in body or current is None:
         out["rule"] = check_rule(body.get("rule"))
+    if "carryOver" in body or current is None:
+        out["carryOver"] = bool(body.get("carryOver"))
     if "archived" in body:
         out["archived"] = bool(body["archived"])
     return out
@@ -342,8 +353,17 @@ class Store:
         return {"people": people, "chores": chores, "schedules": schedules}
 
     def household(self):
+        """The household plus lastDone: {scheduleId: latest day it was done}, for repeats counted
+        from the last time and for chores kept on the list until they're done."""
         with self.lock:
-            return json.loads(json.dumps(self.house))
+            house = json.loads(json.dumps(self.house))
+            last = {}
+            for key in sorted(self.days, reverse=True):
+                for slot in self.days[key]["claimed"]:
+                    if slot.startswith("sched:"):
+                        last.setdefault(slot[6:].rsplit("#", 1)[0], key)
+            house["lastDone"] = last
+            return house
 
     def _active_people(self):
         return {p["id"] for p in self.house["people"] if not p.get("archived")}

@@ -38,6 +38,9 @@ export const weekdayShort = (key) => fmt(key, { weekday: "short" });
 export const longDate = (key) => fmt(key, { weekday: "long", month: "long", day: "numeric" });
 export const shortDate = (key) => fmt(key, { month: "short", day: "numeric" });
 export const dayAndDate = (key) => fmt(key, { weekday: "short", month: "short", day: "numeric" });
+/** "Fri, Jan 8", or "Mon, Mar 15, 2027" when the date is in another year than `todayKey`. */
+export const when = (key, todayKey) => (key.slice(0, 4) === todayKey.slice(0, 4) ? dayAndDate(key)
+  : fmt(key, { weekday: "short", month: "short", day: "numeric", year: "numeric" }));
 export const monthName = (month) => fmt(`${month}-01`, { month: "long", year: "numeric" });
 
 export const tint = (color) => `--person:${color};--ink:${inkFor(color)}`;
@@ -88,16 +91,27 @@ export function renderScoreboard(el, { people, totals, mode, caption }) {
 
 /* ---------- Scheduled chore status (week + month) ---------- */
 
-/** status: "done" | "missed" | "due" | "upcoming" */
-function scheduleStatus(chore, day, key, todayKey) {
+/**
+ * status: "done" | "late" (done on a later day) | "overdue" (kept on the list, still owed) |
+ * "missed" | "due" | "upcoming". lastDone = latest day this schedule was done, if ever.
+ */
+function scheduleStatus(chore, day, key, todayKey, lastDone) {
   const by = day && day.claimed && day.claimed[`${chore.id}#0`];
   if (by) return { status: "done", by };
-  if (key < todayKey) return { status: "missed" };
+  if (chore.overdueSince) return { status: "overdue", since: chore.overdueSince };
+  if (key < todayKey) {
+    if (!(chore.schedule && chore.schedule.carryOver)) return { status: "missed" };
+    return lastDone && lastDone > key ? { status: "late", on: lastDone } : { status: "overdue" };
+  }
   return { status: key === todayKey ? "due" : "upcoming" };
 }
 
+const lastOf = (lastDone, chore) => lastDone && chore.schedule && lastDone[chore.schedule.id];
+
 function schedLabel(chore, st, who) {
   if (st.status === "done") return `${chore.name}: done by ${nameOf(who, st.by)}`;
+  if (st.status === "late") return `${chore.name}: done later, on ${dayAndDate(st.on)}`;
+  if (st.status === "overdue") return `${chore.name}: overdue${st.since ? ` since ${dayAndDate(st.since)}` : ", not done yet"}`;
   if (st.status === "missed") return `${chore.name}: not done`;
   const a = chore.assignee && who[chore.assignee] ? ` (${who[chore.assignee].name})` : "";
   return `${chore.name}${a}: ${st.status === "due" ? "due today" : "scheduled"}`;
@@ -105,14 +119,14 @@ function schedLabel(chore, st, who) {
 
 /* ---------- Week ---------- */
 
-export function renderWeek(el, { keys, todayKey, people, who, daysMap, totals, dailyFor, scheduledFor }) {
+export function renderWeek(el, { keys, todayKey, people, who, daysMap, totals, dailyFor, scheduledFor, lastDone }) {
   const cols = keys.map((key) => {
     const future = key > todayKey;
     const day = daysMap[key];
     const sched = scheduledFor(key, day);
 
     const schedItems = sched.map((c) => {
-      const st = scheduleStatus(c, day, key, todayKey);
+      const st = scheduleStatus(c, day, key, todayKey, lastOf(lastDone, c));
       const color = st.by ? who[st.by]?.color : c.assignee ? who[c.assignee]?.color : null;
       return h("li", {
         class: `sched sched--${st.status}`,
@@ -160,7 +174,7 @@ export function renderWeek(el, { keys, todayKey, people, who, daysMap, totals, d
 
 /* ---------- Month ---------- */
 
-export function renderMonth(el, { month, keys, todayKey, people, who, daysMap, totals, scheduledFor }) {
+export function renderMonth(el, { month, keys, todayKey, people, who, daysMap, totals, scheduledFor, lastDone }) {
   const head = keys.slice(0, 7).map((k) => h("div", { class: "month__dow", text: weekdayShort(k), attrs: { "aria-hidden": "true" } }));
   const cells = keys.map((key) => {
     const inMonth = key.startsWith(month);
@@ -173,7 +187,7 @@ export function renderMonth(el, { month, keys, todayKey, people, who, daysMap, t
       return h("span", { class: `dot dot--${state}`, attrs: { style: tint(p.color), title: `${p.name}: ${pts} pts` } });
     });
     const icons = sched.map((c) => {
-      const st = scheduleStatus(c, day, key, todayKey);
+      const st = scheduleStatus(c, day, key, todayKey, lastOf(lastDone, c));
       const color = st.by ? who[st.by]?.color : null;
       return h("span", {
         class: `micon micon--${st.status}`,
@@ -183,7 +197,7 @@ export function renderMonth(el, { month, keys, todayKey, people, who, daysMap, t
     });
     const dayTotal = totals.reduce((sum, t) => sum + (t.perDay[key] || 0), 0);
     const summary = [
-      ...sched.map((c) => schedLabel(c, scheduleStatus(c, day, key, todayKey), who)),
+      ...sched.map((c) => schedLabel(c, scheduleStatus(c, day, key, todayKey, lastOf(lastDone, c)), who)),
       ...(future ? [] : people.map((p, i) => `${p.name} ${totals[i].perDay[key] || 0} points`)),
     ].join("; ");
     const cls = `cell${inMonth ? "" : " cell--out"}${key === todayKey ? " cell--today" : ""}${future ? " cell--future" : ""}`;
@@ -229,9 +243,10 @@ function choreRows({ chores, claimed, people, who, future, onToggle }) {
         h("span", { class: "who__name", text: p.name })));
       const pts = `${chore.points} pt${chore.points > 1 ? "s" : ""}`;
       const meta = by ? `${pts} · done by ${nameOf(who, by)}`
+        : chore.overdueSince ? `${pts} · overdue since ${dayAndDate(chore.overdueSince)}`
         : chore.assignee && who[chore.assignee] ? `${pts} · ${who[chore.assignee].name}'s turn` : pts;
       rows.push(h("li", {
-        class: `chore${by ? " chore--done" : ""}${chore.scheduled ? " chore--sched" : ""}`,
+        class: `chore${by ? " chore--done" : ""}${chore.scheduled ? " chore--sched" : ""}${!by && chore.overdueSince ? " chore--overdue" : ""}`,
         attrs: by && who[by] ? { style: tint(who[by].color) } : {},
       },
         chore.icon ? h("span", { class: "chore__icon", text: chore.icon, attrs: { "aria-hidden": "true" } }) : null,

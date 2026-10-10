@@ -1,8 +1,8 @@
 // settings.js - the People and Schedule pages: edit household members and repeating chores.
 
-import { h, fill, avatar, tint, dayAndDate } from "./views.js";
+import { h, fill, avatar, tint, when } from "./views.js";
 import { PALETTE, addDays, goalOf } from "./calendar.js";
-import { describeRule, nextOccurrence } from "./schedule.js";
+import { describeRule, nextOccurrence, overdueSince, MONTHS } from "./schedule.js";
 
 const SWATCHES = [...PALETTE, "#e85d75", "#00a6a6", "#f4a261", "#2b2d42", "#8e7dbe", "#4d908e"];
 const GOAL_MIN = 1;
@@ -160,17 +160,28 @@ export function renderPeople(el, { household, icons, onSave, onError }) {
 
 /* ---------- Schedule ---------- */
 
+// The four choices under "How often", and the rule types each one covers.
+const MODES = [["weekly", "Weekly"], ["monthly", "Monthly"], ["yearly", "Yearly"], ["interval", "Every few days"]];
+const modeOf = (type) => (type === "monthly-day" || type === "monthly-nth" ? "monthly" : type);
+
+function ruleDefaults(todayKey) {
+  const now = new Date();
+  return { every: 1, weekdays: [now.getDay()], start: todayKey, day: now.getDate(), nth: 1, weekday: now.getDay(),
+    month: now.getMonth() + 1, days: 90, fromLastDone: true };
+}
+
 function blankDraft(todayKey) {
   return {
-    id: null, name: "", icon: "🗑️", points: 1, assignee: null,
-    rule: { type: "weekly", every: 1, weekdays: [new Date().getDay()], start: todayKey, day: 1, nth: 1, weekday: new Date().getDay() },
+    id: null, name: "", icon: "🗑️", points: 1, assignee: null, carryOver: false, carryOverTouched: false,
+    rule: { type: "weekly", ...ruleDefaults(todayKey) },
   };
 }
 
-function draftFrom(s) {
+function draftFrom(s, todayKey) {
   return {
     id: s.id, name: s.name, icon: s.icon, points: s.points, assignee: s.assignee,
-    rule: { every: 1, weekdays: [0], day: 1, nth: 1, weekday: 0, ...s.rule },
+    carryOver: !!s.carryOver, carryOverTouched: true,
+    rule: { ...ruleDefaults(todayKey), ...s.rule },
   };
 }
 
@@ -178,6 +189,8 @@ function draftFrom(s) {
 function cleanRule(r) {
   if (r.type === "weekly") return { type: "weekly", every: r.every, weekdays: [...r.weekdays].sort(), start: r.start };
   if (r.type === "monthly-day") return { type: "monthly-day", every: r.every, day: r.day, start: r.start };
+  if (r.type === "yearly") return { type: "yearly", month: r.month, day: r.day, start: r.start };
+  if (r.type === "interval") return { type: "interval", days: r.days, fromLastDone: !!r.fromLastDone, start: r.start };
   return { type: "monthly-nth", every: r.every, nth: r.nth, weekday: r.weekday, start: r.start };
 }
 
@@ -187,42 +200,66 @@ function select(options, value, onChange, label) {
 }
 
 function scheduleForm(ctx) {
-  const { icons, people, todayKey, onSave, onCancel } = ctx;
+  const { icons, people, todayKey, lastDone, onSave, onCancel } = ctx;
   const d = scheduleDraft;
   const preview = h("p", { class: "form__preview", attrs: { "aria-live": "polite" } });
   const error = h("p", { class: "form__error", attrs: { role: "alert" } });
-  const weekly = h("div", { class: "form__row" });
-  const monthly = h("div", { class: "form__row" });
+  const sections = {
+    weekly: h("div", { class: "form__row" }),
+    monthly: h("div", { class: "form__row" }),
+    yearly: h("div", { class: "form__row" }),
+    interval: h("div", { class: "form__row" }),
+  };
   const byDate = h("div", { class: "form__inline" });
   const byWeekday = h("div", { class: "form__inline" });
   const iconBtn = h("button", { class: "icon-choice", text: d.icon, attrs: { type: "button", "aria-label": "Choose icon" } });
   const iconSlot = h("div");
+  const startLabel = h("span", { class: "field__label" });
+  const carry = h("input", { attrs: { type: "checkbox" }, on: { change: (e) => { d.carryOver = e.target.checked; d.carryOverTouched = true; refresh(); } } });
   let root = null; // the form, once built; refresh() reads its buttons
+
+  function setMode(mode) {
+    if (mode === "weekly") d.rule.type = "weekly";
+    else if (mode === "monthly") { if (modeOf(d.rule.type) !== "monthly") d.rule.type = "monthly-nth"; }
+    else d.rule.type = mode;
+    // Rare chores are worth chasing; weekly ones just come round again.
+    if (!d.carryOverTouched) d.carryOver = mode !== "weekly";
+    refresh();
+  }
 
   function refresh() {
     const r = d.rule;
-    const isWeekly = r.type === "weekly";
-    weekly.hidden = !isWeekly;
-    monthly.hidden = isWeekly;
+    const mode = modeOf(r.type);
+    for (const [m, el] of Object.entries(sections)) el.hidden = m !== mode;
     byDate.hidden = r.type !== "monthly-day";
     byWeekday.hidden = r.type !== "monthly-nth";
-    for (const b of root.querySelectorAll("[data-repeat]")) b.setAttribute("aria-pressed", String((b.dataset.repeat === "weekly") === isWeekly));
+    for (const b of root.querySelectorAll("[data-repeat]")) b.setAttribute("aria-pressed", String(b.dataset.repeat === mode));
     for (const b of root.querySelectorAll("[data-mode]")) b.setAttribute("aria-pressed", String(b.dataset.mode === r.type));
     for (const b of root.querySelectorAll("[data-wd]")) b.setAttribute("aria-pressed", String(r.weekdays.includes(Number(b.dataset.wd))));
     iconBtn.textContent = d.icon;
+    carry.checked = d.carryOver;
+    startLabel.textContent = mode === "interval" ? "First due" : "Starting";
     const rule = cleanRule(r);
-    if (isWeekly && !rule.weekdays.length) {
+    if (mode === "weekly" && !rule.weekdays.length) {
       preview.textContent = "Pick at least one day.";
       return;
     }
+    if (mode === "interval" && !(rule.days >= 2 && rule.days <= 730)) {
+      preview.textContent = "Pick a number of days from 2 to 730.";
+      return;
+    }
+    const last = d.id ? lastDone[d.id] : undefined;
     const upcoming = [];
-    for (let key = nextOccurrence(rule, todayKey); key && upcoming.length < 3; key = nextOccurrence(rule, addDays(key, 1))) upcoming.push(key);
-    preview.textContent = `${describeRule(rule)}. Next: ${upcoming.map(dayAndDate).join(", ") || "never"}.`;
+    for (let key = nextOccurrence(rule, todayKey, last); key && upcoming.length < 3; key = nextOccurrence(rule, addDays(key, 1), last)) upcoming.push(key);
+    const then = rule.type === "interval" && rule.fromLastDone && upcoming.length ? " (each one moves if it's done early or late)" : "";
+    const owed = overdueSince({ rule, carryOver: d.carryOver }, todayKey, last);
+    const now = owed ? `Already due ${when(owed, todayKey)}, so it will show as overdue until it's done. ` : "";
+    preview.textContent = `${describeRule(rule)}. ${now}Next: ${upcoming.map((k) => when(k, todayKey)).join("; ") || "never"}${then}.`;
   }
 
   const name = h("input", {
     class: "field__input",
-    attrs: { type: "text", value: d.name, maxlength: "40", placeholder: "e.g. Take the bins out", required: true, autocomplete: "off" },
+    attrs: { type: "text", value: d.name, maxlength: "40", placeholder: "e.g. Change the furnace filter", required: true, autocomplete: "off" },
     on: { input: (e) => { d.name = e.target.value; } },
   });
   iconBtn.addEventListener("click", () => {
@@ -230,7 +267,7 @@ function scheduleForm(ctx) {
     else iconSlot.replaceChildren(iconMenu(icons, d.icon, (icon) => { d.icon = icon; iconSlot.replaceChildren(); refresh(); }, { prefer: "Household" }));
   });
 
-  weekly.append(
+  sections.weekly.append(
     h("span", { class: "field__label", text: "Repeat" }),
     h("div", { class: "form__inline" },
       select([[1, "every week"], [2, "every other week"], [3, "every 3 weeks"], [4, "every 4 weeks"]], d.rule.every,
@@ -249,20 +286,43 @@ function scheduleForm(ctx) {
         },
       })))));
 
+  const dayOptions = Array.from({ length: 31 }, (_, i) => [i + 1, String(i + 1)]);
   byDate.append(h("span", { text: "on day" }),
-    select(Array.from({ length: 31 }, (_, i) => [i + 1, String(i + 1)]), d.rule.day, (v) => { d.rule.day = Number(v); refresh(); }, "Day of the month"));
+    select(dayOptions, d.rule.day, (v) => { d.rule.day = Number(v); refresh(); }, "Day of the month"));
   byWeekday.append(h("span", { text: "on the" }),
     select([[1, "1st"], [2, "2nd"], [3, "3rd"], [4, "4th"], [-1, "last"]], d.rule.nth, (v) => { d.rule.nth = Number(v); refresh(); }, "Which week"),
     select(WEEKDAY_NAMES.map((n, i) => [i, n]), d.rule.weekday, (v) => { d.rule.weekday = Number(v); refresh(); }, "Weekday"));
-  monthly.append(
+  sections.monthly.append(
     h("span", { class: "field__label", text: "Repeat" }),
     h("div", { class: "form__inline" },
-      select([[1, "every month"], [2, "every 2 months"], [3, "every 3 months"], [6, "every 6 months"], [12, "every year"]], d.rule.every,
+      select([[1, "every month"], [2, "every 2 months"], [3, "every 3 months (quarterly)"], [6, "every 6 months (twice a year)"], [12, "every 12 months"]], d.rule.every,
         (v) => { d.rule.every = Number(v); refresh(); }, "How often"),
       h("div", { class: "seg seg--small", attrs: { role: "group", "aria-label": "Monthly by" } },
         h("button", { text: "By date", attrs: { type: "button", "data-mode": "monthly-day" }, on: { click: () => { d.rule.type = "monthly-day"; refresh(); } } }),
         h("button", { text: "By weekday", attrs: { type: "button", "data-mode": "monthly-nth" }, on: { click: () => { d.rule.type = "monthly-nth"; refresh(); } } }))),
-    h("div", { class: "form__inline" }, byDate, byWeekday));
+    h("div", { class: "form__inline" }, byDate, byWeekday),
+    h("p", { class: "form__hint", text: "Quarterly or twice-yearly chores count their months from the starting date." }));
+
+  sections.yearly.append(
+    h("span", { class: "field__label", text: "Every year on" }),
+    h("div", { class: "form__inline" },
+      select(MONTHS.map((m, i) => [i + 1, m]), d.rule.month, (v) => { d.rule.month = Number(v); refresh(); }, "Month"),
+      select(dayOptions, d.rule.day, (v) => { d.rule.day = Number(v); refresh(); }, "Day")));
+
+  sections.interval.append(
+    h("span", { class: "field__label", text: "Repeat" }),
+    h("div", { class: "form__inline" },
+      h("span", { text: "every" }),
+      h("input", {
+        class: "field__input field__input--num",
+        attrs: { type: "number", min: "2", max: "730", step: "1", value: String(d.rule.days), "aria-label": "Number of days", inputmode: "numeric" },
+        on: { input: (e) => { d.rule.days = Number(e.target.value); refresh(); } },
+      }),
+      h("span", { text: "days" })),
+    h("label", { class: "check" },
+      h("input", { attrs: { type: "checkbox", checked: d.rule.fromLastDone }, on: { change: (e) => { d.rule.fromLastDone = e.target.checked; refresh(); } } }),
+      h("span", { text: "Count from the last time it was done" })),
+    h("p", { class: "form__hint", text: "On: changing a filter 10 days late pushes the next one back 10 days. Off: it stays on a fixed every-90-days rhythm." }));
 
   const form = root = h("form", {
     class: "sched-form",
@@ -271,7 +331,7 @@ function scheduleForm(ctx) {
         e.preventDefault();
         error.textContent = "";
         try {
-          await onSave(d.id, { name: d.name, icon: d.icon, points: d.points, assignee: d.assignee, rule: cleanRule(d.rule) });
+          await onSave(d.id, { name: d.name, icon: d.icon, points: d.points, assignee: d.assignee, rule: cleanRule(d.rule), carryOver: d.carryOver });
         } catch (err) {
           error.textContent = err.message;
         }
@@ -285,20 +345,23 @@ function scheduleForm(ctx) {
     iconSlot,
     h("div", { class: "form__row" },
       h("span", { class: "field__label", text: "How often" }),
-      h("div", { class: "seg seg--small", attrs: { role: "group", "aria-label": "Repeats" } },
-        h("button", { text: "Weekly", attrs: { type: "button", "data-repeat": "weekly" }, on: { click: () => { d.rule.type = "weekly"; refresh(); } } }),
-        h("button", { text: "Monthly", attrs: { type: "button", "data-repeat": "monthly" },
-          on: { click: () => { if (d.rule.type === "weekly") d.rule.type = "monthly-nth"; refresh(); } } }))),
-    weekly,
-    monthly,
+      h("div", { class: "seg seg--small seg--wrap", attrs: { role: "group", "aria-label": "Repeats" } },
+        MODES.map(([m, label]) => h("button", { text: label, attrs: { type: "button", "data-repeat": m }, on: { click: () => setMode(m) } })))),
+    sections.weekly,
+    sections.monthly,
+    sections.yearly,
+    sections.interval,
     h("div", { class: "form__row form__row--split" },
-      h("label", { class: "field" }, h("span", { class: "field__label", text: "Starting" }),
+      h("label", { class: "field" }, startLabel,
         h("input", { class: "field__input", attrs: { type: "date", value: d.rule.start, required: true },
           on: { change: (e) => { if (e.target.value) { d.rule.start = e.target.value; refresh(); } } } })),
       h("label", { class: "field" }, h("span", { class: "field__label", text: "Points" }),
         select([1, 2, 3, 4, 5, 6, 8, 10].map((n) => [n, String(n)]), d.points, (v) => { d.points = Number(v); }, "Points")),
       h("label", { class: "field" }, h("span", { class: "field__label", text: "Whose turn" }),
         select([["", "Anyone"], ...people.map((p) => [p.id, `${p.icon} ${p.name}`])], d.assignee || "", (v) => { d.assignee = v || null; }, "Whose turn"))),
+    h("div", { class: "form__row" },
+      h("label", { class: "check" }, carry, h("span", { text: "Keep it on the list until it's done" })),
+      h("p", { class: "form__hint", text: "If nobody does it on the day, it stays on today's list, marked overdue, until someone does." })),
     preview,
     error,
     h("div", { class: "form__actions" },
@@ -419,8 +482,9 @@ function scheduleSection({ household, icons, todayKey, onSave, onError, redraw }
   const who = Object.fromEntries(household.people.map((p) => [p.id, p]));
   const active = household.schedules.filter((s) => !s.archived);
 
+  const lastDone = household.lastDone || {};
   const ctx = {
-    icons, people, todayKey,
+    icons, people, todayKey, lastDone,
     onSave: async (id, fields) => {
       await onSave(id, fields); // throws to the form on a validation error
       scheduleDraft = null;
@@ -430,20 +494,22 @@ function scheduleSection({ household, icons, todayKey, onSave, onError, redraw }
   };
 
   const items = active
-    .map((s) => ({ s, next: nextOccurrence(s.rule, todayKey) }))
-    .sort((a, b) => (a.next || "9999").localeCompare(b.next || "9999"))
-    .map(({ s, next }) => h("li", { class: "sched-item" },
+    .map((s) => ({ s, late: overdueSince(s, todayKey, lastDone[s.id]), next: nextOccurrence(s.rule, todayKey, lastDone[s.id]) }))
+    .sort((a, b) => (a.late || a.next || "9999").localeCompare(b.late || b.next || "9999"))
+    .map(({ s, late, next }) => h("li", { class: `sched-item${late ? " sched-item--overdue" : ""}` },
       h("span", { class: "sched-item__icon", text: s.icon, attrs: { "aria-hidden": "true" } }),
       h("div", { class: "sched-item__body" },
         h("div", { class: "sched-item__name", text: s.name }),
         h("div", { class: "sched-item__rule", text: describeRule(s.rule) }),
         h("div", { class: "sched-item__meta" },
-          h("span", { text: next ? (next === todayKey ? "Today" : `Next: ${dayAndDate(next)}`) : "No more dates" }),
+          late ? h("span", { class: "sched-item__late", text: `Overdue since ${when(late, todayKey)}` })
+            : h("span", { text: next ? (next === todayKey ? "Today" : `Next: ${when(next, todayKey)}`) : "No more dates" }),
+          lastDone[s.id] ? h("span", { text: ` · last done ${when(lastDone[s.id], todayKey)}` }) : null,
           h("span", { text: ` · ${s.points} pt${s.points > 1 ? "s" : ""} · ` }),
           s.assignee && who[s.assignee] ? h("span", { class: "sched-item__who", attrs: { style: tint(who[s.assignee].color) } },
             h("span", { text: `${who[s.assignee].icon} ${who[s.assignee].name}` })) : h("span", { text: "Anyone" }))),
       h("div", { class: "sched-item__actions" },
-        h("button", { text: "Edit", attrs: { type: "button" }, on: { click: () => { scheduleDraft = draftFrom(s); redraw(); } } }),
+        h("button", { text: "Edit", attrs: { type: "button" }, on: { click: () => { scheduleDraft = draftFrom(s, todayKey); redraw(); } } }),
         h("button", {
           class: "danger",
           text: "Delete",
@@ -458,7 +524,7 @@ function scheduleSection({ household, icons, todayKey, onSave, onError, redraw }
 
   return h("section", { class: "chores-section" },
     h("h2", { class: "section-title", text: "On particular days" }),
-    h("p", { class: "page-intro", text: "Chores that happen on particular days, like bin night or mowing the lawn. They repeat by themselves and show up on the calendar ahead of time." }),
+    h("p", { class: "page-intro", text: "Chores that happen on particular days: bin night every Tuesday, the lawn every other Friday, the furnace filter every 90 days, the smoke alarms once a year. They repeat by themselves and show up on the calendar ahead of time." }),
     scheduleDraft ? scheduleForm(ctx) : h("button", {
       class: "primary add-sched",
       text: "+ Schedule a chore",

@@ -19,8 +19,9 @@ files on your own machine.
 - **Per-person daily goals.** A six-year-old can aim for 2 points while a teenager aims for 6;
   "goal met" is judged against each person's own number.
 - **Scheduled chores that repeat**: every Tuesday, every other Friday, the 2nd Wednesday of
-  the month, the 1st of every 3 months. They appear on the calendar ahead of time, marked done
-  or missed afterwards, with an optional "whose turn".
+  the month, quarterly, once a year on March 15, or every 90 days counted from the last time
+  it was done (furnace filters). They appear on the calendar ahead of time, with an optional
+  "whose turn", and rare ones can stay on the list, marked overdue, until someone does them.
 - **Edit the chore list in the app**: add, rename, re-icon, change points or "twice a day",
   reorder and remove everyday chores. Removing or changing a chore never erases points
   people already earned with it.
@@ -127,7 +128,7 @@ python3 server.py --port 8420 --data ./data
 ## Development
 
 ```bash
-npm test     # 74 JavaScript tests (node --test) + 28 Python server tests; no dependencies to install
+npm test     # 87 JavaScript tests (node --test) + 30 Python server tests; no dependencies to install
 npm start    # http://127.0.0.1:8420/ with data in ./data
 ```
 
