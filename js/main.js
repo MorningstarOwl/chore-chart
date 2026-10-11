@@ -4,6 +4,7 @@ import { toKey, isKey, addDays, weekStart, weekDays, monthOf, addMonths, monthGr
 import { scheduledFor, choresForDay, dailyFor } from "./schedule.js";
 import { renderScoreboard, renderWeek, renderMonth, renderDay, longDate, shortDate, monthName } from "./views.js";
 import { renderPeople, renderChores, settingsBusy } from "./settings.js";
+import { renderStats, HISTORY_WEEKS } from "./stats.js";
 
 const POLL_MS = 10000;
 const $ = (id) => document.getElementById(id);
@@ -15,11 +16,11 @@ function showFailure(message) {
   banner.classList.toggle("banner--hidden", !message);
 }
 
-/** "#month/2026-10" (default), "#week/2026-10-04", "#day/2026-10-09", "#people", "#chores" ("#schedule" still works). */
+/** "#month/2026-10" (default), "#week/2026-10-04", "#day/2026-10-09", "#stats/2026-10-04", "#people", "#chores" ("#schedule" still works). */
 function parseRoute() {
   const [view, arg] = location.hash.replace(/^#\/?/, "").split("/");
   const t = today();
-  if (view === "week") return { view, key: weekStart(isKey(arg) ? arg : t) };
+  if (view === "week" || view === "stats") return { view, key: weekStart(isKey(arg) ? arg : t) };
   if (view === "day") return { view, key: isKey(arg) ? arg : t };
   if (view === "people") return { view };
   if (view === "chores" || view === "schedule") return { view: "chores" };
@@ -59,14 +60,15 @@ async function init() {
 
   function setNav(route, { prev, next, todayHref, label }) {
     const calendar = route.view === "month" || route.view === "week" || route.view === "day";
-    for (const v of ["month", "week", "people", "chores"]) {
+    const stepping = calendar || route.view === "stats";
+    for (const v of ["month", "week", "stats", "people", "chores"]) {
       $(`tab-${v}`).setAttribute("aria-current", route.view === v ? "page" : "false");
     }
     $("tab-month").href = route.view === "day" ? `#month/${monthOf(route.key)}` : "#month";
     $("tab-week").href = route.view === "day" ? `#week/${route.key}` : "#week";
-    $("stepper").hidden = !calendar;
+    $("stepper").hidden = !stepping;
     $("scoreboard").hidden = !calendar;
-    if (calendar) {
+    if (stepping) {
       $("prev").href = prev;
       $("next").href = next;
       $("today-link").href = todayHref;
@@ -109,6 +111,12 @@ async function init() {
           if (confirm(`Clear every chore logged for ${longDate(key)}?`)) act(key, "clear");
         },
       });
+    } else if (route.view === "stats") {
+      const keys = weekDays(route.key);
+      const current = route.key === weekStart(t);
+      setNav(route, { prev: `#stats/${addDays(route.key, -7)}`, next: `#stats/${addDays(route.key, 7)}`, todayHref: "#stats",
+        label: `${current ? "Scores this week" : "Scores"} · ${shortDate(keys[0])} – ${shortDate(keys[6])}` });
+      renderStats(view, { weekKey: route.key, todayKey: t, people, daysMap, choresFor });
     } else if (route.view === "people") {
       setNav(route, { label: "People" });
       renderPeople(view, {
@@ -150,8 +158,10 @@ async function init() {
           dayDetail = { key: route.key, data };
           changed = true;
         }
-      } else if (route.view === "month" || route.view === "week") {
-        const keys = route.view === "week" ? weekDays(route.key) : monthGrid(route.month);
+      } else if (route.view === "month" || route.view === "week" || route.view === "stats") {
+        const keys = route.view === "week" ? weekDays(route.key)
+          : route.view === "stats" ? Array.from({ length: 7 * (HISTORY_WEEKS + 1) }, (_, i) => addDays(route.key, i - 7 * HISTORY_WEEKS))
+          : monthGrid(route.month);
         const fresh = await fetchRange(keys[0], keys[keys.length - 1]);
         if (seen !== writes || busy) return;
         const merged = { ...daysMap };

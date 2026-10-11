@@ -124,7 +124,7 @@ class ServerTest(unittest.TestCase):
         status, body = self.call("/api/days?from=2026-10-01&to=2026-10-07")
         self.assertEqual(status, 200)
         self.assertEqual(body, {"days": {"2026-10-01": {"claimed": {"trash#0": "sam"}}}})
-        self.assertEqual(self.call("/api/days?from=2026-10-01&to=2026-12-31")[0], 400)
+        self.assertEqual(self.call("/api/days?from=2026-10-01&to=2027-01-31")[0], 400)
         self.assertEqual(self.call("/api/days?from=2026-10-07&to=2026-10-01")[0], 400)
         self.assertEqual(self.call("/api/days?from=junk&to=2026-10-01")[0], 400)
 
@@ -175,6 +175,20 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(added["goal"], 5)
         added = self.call("/api/people", {"name": "Ash", "color": "#123456", "icon": "🦔", "goal": 8})[1]["people"][-1]
         self.assertEqual(added["goal"], 8)
+
+    def test_weekly_target_and_reward(self):
+        jordan = self.call("/api/household")[1]["people"][3]
+        self.assertEqual((jordan["weeklyTarget"], jordan["reward"]), (None, None))
+        house = self.call("/api/people/jordan", {"weeklyTarget": 14, "reward": "  Pick   Friday's movie "})[1]
+        self.assertEqual((house["people"][3]["weeklyTarget"], house["people"][3]["reward"]), (14, "Pick Friday's movie"))
+        house = self.call("/api/people/jordan", {"weeklyTarget": None, "reward": ""})[1]
+        self.assertEqual((house["people"][3]["weeklyTarget"], house["people"][3]["reward"]), (None, None))
+        for bad in ({"weeklyTarget": 0}, {"weeklyTarget": 1001}, {"weeklyTarget": "ten"}, {"reward": "x" * 61}):
+            self.assertEqual(self.call("/api/people/jordan", bad)[0], 400, bad)
+
+    def test_nine_week_range_allowed(self):
+        self.assertEqual(self.call("/api/days?from=2026-08-09&to=2026-10-10")[0], 200)
+        self.assertEqual(self.call("/api/days?from=2026-07-01&to=2026-10-10")[0], 400)
 
     def test_household_without_goals_loads_with_default(self):
         path = Path(self.tmp.name) / "household.json"

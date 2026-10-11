@@ -644,6 +644,69 @@ button.danger { color: var(--crit-text); }
 .form__error:empty { display: none; }
 .form__actions { display: flex; gap: var(--space-2); }
 
+/* Scores */
+.stats__head { margin-bottom: var(--space-3); }
+.stats__note { color: var(--muted); font-weight: 600; }
+.stats__cheer {
+  margin-top: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, #f4c430 22%, var(--surface));
+  border: 1px solid color-mix(in srgb, #f4c430 60%, var(--border));
+  font-weight: 700;
+  font-size: var(--text-lg);
+}
+.board { list-style: none; display: flex; flex-direction: column; gap: var(--space-3); }
+.board__row {
+  display: grid;
+  grid-template-columns: 48px 64px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 6px solid var(--person);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+.board__row--earned {
+  background: color-mix(in srgb, #f4c430 14%, var(--surface));
+  box-shadow: 0 0 0 2px color-mix(in srgb, #f4c430 55%, transparent), var(--shadow);
+}
+.board__rank { font-size: 34px; text-align: center; font-weight: 800; color: var(--muted); line-height: 1; }
+.board__main { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.board__name { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-3); font-size: var(--text-lg); font-weight: 700; }
+.board__points { color: var(--muted); font-size: var(--text-sm); font-weight: 600; white-space: nowrap; }
+.board__points strong { font-size: 30px; color: var(--text); }
+.board__reward { color: var(--muted); font-size: var(--text-sm); }
+.board__status { font-size: var(--text-sm); color: var(--muted); }
+.board__earned { color: var(--text); font-weight: 700; }
+.meter--big { height: 14px; margin-top: 2px; }
+
+.bars { display: flex; gap: 6px; align-items: flex-end; }
+.bars__day { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 26px; }
+.bars__track { position: relative; width: 18px; height: 72px; background: var(--surface-2); border-radius: 6px; overflow: hidden; }
+.bars__fill { position: absolute; left: 0; right: 0; bottom: 0; background: color-mix(in srgb, var(--person) 45%, transparent); border-radius: 6px 6px 0 0; }
+.bars__fill--met { background: var(--person); }
+.bars__goal { position: absolute; left: 0; right: 0; border-top: 2px dashed color-mix(in srgb, var(--text) 45%, transparent); }
+.bars__num { font-size: 11px; font-weight: 700; min-height: 14px; }
+.bars__label { font-size: 11px; color: var(--muted); }
+.bars__day--today .bars__label { color: var(--today); font-weight: 800; }
+.bars__day--future { opacity: 0.4; }
+
+.history { margin-top: var(--space-6); }
+.history__scroll { overflow-x: auto; }
+.history__table { border-collapse: collapse; width: 100%; background: var(--surface); border-radius: var(--radius-md); overflow: hidden; }
+.history__table th, .history__table td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border); text-align: center; white-space: nowrap; }
+.history__table thead th { font-size: var(--text-xs); color: var(--muted); }
+.history__table thead th .avatar { width: 28px; height: 28px; font-size: 16px; margin-right: 6px; vertical-align: middle; }
+.history__table tbody th { text-align: left; font-weight: 600; }
+.history__table tbody th a { color: var(--accent); }
+.hist--earned { font-weight: 700; background: color-mix(in srgb, #f4c430 12%, transparent); }
+
+.reward-fields .form__inline { gap: var(--space-2); }
+.reward-fields__unit { color: var(--muted); font-size: var(--text-xs); }
+
 .foot { text-align: center; font-size: var(--text-xs); color: var(--muted); padding-top: var(--space-3); }
 
 /* Tablet: week becomes two rows of cards */
@@ -669,6 +732,13 @@ button.danger { color: var(--crit-text); }
   .dot { width: 9px; height: 9px; }
   .chores { grid-template-columns: 1fr; }
   .people, .sched-list, .daily-list { grid-template-columns: 1fr; }
+  .board__row { grid-template-columns: 36px 48px minmax(0, 1fr); gap: var(--space-3); padding: var(--space-3); }
+  .board__row .avatar--xl { width: 48px; height: 48px; font-size: 28px; }
+  .board__rank { font-size: 26px; }
+  .board__points strong { font-size: 24px; }
+  .bars { grid-column: 1 / -1; justify-content: space-between; }
+  .bars__day { width: auto; flex: 1; }
+  .bars__track { width: 100%; max-width: 28px; height: 56px; }
   .daily-item { flex-wrap: wrap; }
   .daily-item__actions { width: 100%; justify-content: flex-end; }
   .seg--menu { width: 100%; }

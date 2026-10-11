@@ -23,14 +23,15 @@ Settings (flags win over environment variables):
 
 API (all JSON):
   GET  /api/day/YYYY-MM-DD   -> {"claimed": {slotId: participantId}, "log": [...]}
-  GET  /api/days?from=YYYY-MM-DD&to=YYYY-MM-DD -> {"days": {key: {"claimed": {...}}}} (calendar views, max 62 days)
+  GET  /api/days?from=YYYY-MM-DD&to=YYYY-MM-DD -> {"days": {key: {"claimed": {...}}}} (calendar and Scores views, max 93 days)
   POST /api/day/YYYY-MM-DD   body {"op": "claim"|"release"|"clear"|"undo", "slotId", "participantId"}
                              -> the updated day; 409 if the op no longer applies (someone beat you to it).
                              Claims on days after tomorrow (server time) are refused: chores are logged, not planned.
   GET  /api/household        -> {"people": [...], "chores": [...], "schedules": [...], "lastDone": {...}}
                              (archived entries included; lastDone = latest day each schedule was done)
   POST /api/people           body {"name", "color", "icon", "goal"?} -> household; adds a person (goal 1-20, default 5)
-  POST /api/people/ID        body with any of name/color/icon/goal/archived -> household
+  POST /api/people/ID        body with any of name/color/icon/goal/weeklyTarget/reward/archived -> household
+                             (weeklyTarget null = daily goal x 7; reward = what they're working towards)
   POST /api/chores           body {"name", "icon"?, "points", "slotsPerDay"} -> household; adds an everyday chore
   POST /api/chores/ID        body with any of name/icon/points/slotsPerDay/archived -> household
   POST /api/chore-order      body {"ids": [...]} -> household; the everyday list in this order
@@ -81,7 +82,7 @@ def config_path(name):
     return ROOT / "config" / name
 
 MAX_LOG = 500
-MAX_RANGE_DAYS = 62
+MAX_RANGE_DAYS = 93  # the Scores page reads 9 weeks
 KEEP_DAYS = 400  # about 13 months of history; older days are dropped on write
 
 
@@ -148,6 +149,13 @@ def check_person(body, current=None):
         out["icon"] = body["icon"]
     if "goal" in body or current is None:
         out["goal"] = _int(body.get("goal", DEFAULT_GOAL), "daily goal", 1, 20)
+    if "weeklyTarget" in body or current is None:
+        # None = automatic (daily goal x 7).
+        target = body.get("weeklyTarget")
+        out["weeklyTarget"] = None if target in (None, "") else _int(target, "weekly target", 1, 1000)
+    if "reward" in body or current is None:
+        reward = body.get("reward")
+        out["reward"] = None if reward is None or (isinstance(reward, str) and not reward.strip()) else _text(reward, "reward", 60)
     if "archived" in body:
         out["archived"] = bool(body["archived"])
     return out
@@ -310,7 +318,8 @@ class Store:
         # First run: seed from config/participants.json, keeping their ids so old claims still match.
         seed = json.loads(config_path("participants.json").read_text())["participants"]
         people = [{"id": p["id"], "name": p["name"], "color": p.get("color") or SEED_COLORS[i % len(SEED_COLORS)],
-                   "icon": SEED_ICONS[i % len(SEED_ICONS)], "goal": DEFAULT_GOAL} for i, p in enumerate(seed)]
+                   "icon": SEED_ICONS[i % len(SEED_ICONS)], "goal": DEFAULT_GOAL, "weeklyTarget": None, "reward": None}
+                  for i, p in enumerate(seed)]
         house = {"people": people, "chores": seed_chores(), "schedules": []}
         write_json(self.house_path, house)
         return house
@@ -327,7 +336,9 @@ class Store:
                 body = {**p, "icon": p.get("icon") if p.get("icon") in icons else SEED_ICONS[i % len(SEED_ICONS)],
                         "color": p.get("color") if isinstance(p.get("color"), str) and COLOR_RE.match(p["color"])
                         else SEED_COLORS[i % len(SEED_COLORS)],
-                        "goal": p.get("goal") if isinstance(p.get("goal"), int) and 1 <= p["goal"] <= 20 else DEFAULT_GOAL}
+                        "goal": p.get("goal") if isinstance(p.get("goal"), int) and 1 <= p["goal"] <= 20 else DEFAULT_GOAL,
+                        "weeklyTarget": p.get("weeklyTarget") if isinstance(p.get("weeklyTarget"), int) and 1 <= p["weeklyTarget"] <= 1000 else None,
+                        "reward": p.get("reward") if isinstance(p.get("reward"), str) and 0 < len(p["reward"].strip()) <= 60 else None}
                 people.append({"id": p["id"], **check_person(body, None), "archived": bool(p.get("archived"))})
         if not any(not p["archived"] for p in people):
             raise ValueError("household has nobody in it")

@@ -10,6 +10,11 @@ export function goalOf(person) {
   return Number.isInteger(person && person.goal) ? person.goal : DAILY_GOAL;
 }
 
+/** A person's weekly points target: their own if set, else their daily goal x 7. */
+export function weeklyTargetOf(person) {
+  return Number.isInteger(person && person.weeklyTarget) ? person.weeklyTarget : goalOf(person) * 7;
+}
+
 export function toKey(date) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");

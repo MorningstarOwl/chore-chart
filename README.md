@@ -10,12 +10,17 @@ files on your own machine.
 
 ![Month view](docs/month.png)
 
+![Weekly scores](docs/scores.png)
+
 ## Features
 
 - **Month and week calendars** with a scoreboard for the period on screen: points, days at
   goal, and who's on top.
 - **Log from any device.** Everyone sees the same chart; a chore logged on a phone appears on
   the tablet within seconds. Two people can't claim the same chore.
+- **Weekly scores and rewards.** A Scores page that resets every Sunday: each person's points
+  toward their own weekly target and the reward they're working for ("Pick Friday's movie"),
+  day-by-day bars, a fair ranking by progress, and the last 8 weeks at a glance.
 - **Per-person daily goals.** A six-year-old can aim for 2 points while a teenager aims for 6;
   "goal met" is judged against each person's own number.
 - **Scheduled chores that repeat**: every Tuesday, every other Friday, the 2nd Wednesday of
@@ -60,7 +65,8 @@ To build the image yourself instead: `docker build -t chore-chart .`
 ### First steps
 
 1. Open **People**. Four sample people (Alex, Sam, Riley, Jordan) are there to start with:
-   rename them, pick colours and critters, set each person's daily goal, add or remove people.
+   rename them, pick colours and critters, set each person's daily goal and weekly reward,
+   add or remove people.
 2. Open **Chores**: trim the starter list of everyday chores to fit your home, and add the
    ones that happen on particular days (bins, lawn, filters).
 3. Bookmark the page (or "Add to Home Screen") on every device.
@@ -128,7 +134,7 @@ python3 server.py --port 8420 --data ./data
 ## Development
 
 ```bash
-npm test     # 87 JavaScript tests (node --test) + 30 Python server tests; no dependencies to install
+npm test     # 94 JavaScript tests (node --test) + 32 Python server tests; no dependencies to install
 npm start    # http://127.0.0.1:8420/ with data in ./data
 ```
 
@@ -140,6 +146,7 @@ The front end is plain HTML, CSS and ES modules with no build step:
 | `js/main.js` | Routing, data loading, polling |
 | `js/views.js` | Month, week, day views and scoreboard |
 | `js/settings.js` | People and Chores pages |
+| `js/stats.js` | Scores page: weekly standings, rewards, earlier weeks |
 | `js/theme.js` | Light/dark switch (loaded before first paint) |
 | `js/schedule.js` | Repeat rules (`occursOn`, `describeRule`, `nextOccurrence`) |
 | `js/calendar.js` | Date maths and period totals |

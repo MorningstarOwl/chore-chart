@@ -42,6 +42,47 @@ function iconMenu(groups, current, onPick, { prefer, allowNone } = {}) {
 
 /* ---------- People ---------- */
 
+/** Weekly target (blank = daily goal x 7) and the reward it earns. Both save when you leave the box. */
+function rewardFields(p, save) {
+  const auto = goalOf(p) * 7;
+  const target = h("input", {
+    class: "field__input field__input--num",
+    attrs: { type: "number", min: "1", max: "1000", step: "1", inputmode: "numeric", placeholder: String(auto),
+      value: Number.isInteger(p.weeklyTarget) ? String(p.weeklyTarget) : "", "aria-label": `${p.name}'s weekly target in points` },
+    on: {
+      change: (e) => {
+        const v = e.target.value.trim();
+        const next = v === "" ? null : Number(v);
+        if (next === (p.weeklyTarget ?? null)) return;
+        if (next !== null && !(Number.isInteger(next) && next >= 1 && next <= 1000)) {
+          e.target.value = p.weeklyTarget ?? "";
+          return;
+        }
+        save(p.id, { weeklyTarget: next });
+      },
+      keydown: (e) => { if (e.key === "Enter") e.target.blur(); },
+    },
+  });
+  const reward = h("input", {
+    class: "field__input",
+    attrs: { type: "text", maxlength: "60", value: p.reward || "", placeholder: "e.g. Pick Friday's movie", autocomplete: "off",
+      "aria-label": `What ${p.name} is working towards` },
+    on: {
+      change: (e) => {
+        const v = e.target.value.trim();
+        if (v !== (p.reward || "")) save(p.id, { reward: v || null });
+      },
+      keydown: (e) => { if (e.key === "Enter") e.target.blur(); },
+    },
+  });
+  return h("div", { class: "field reward-fields" },
+    h("span", { class: "field__label", text: "Weekly reward" }),
+    h("div", { class: "form__inline" },
+      target,
+      h("span", { class: "reward-fields__unit", text: Number.isInteger(p.weeklyTarget) ? "pts a week" : `pts a week (blank = ${auto}, daily goal × 7)` })),
+    reward);
+}
+
 /** − 5 pts + : changes show at once and save after a short pause, so quick taps add up. */
 function goalStepper(p, save) {
   let value = goalOf(p);
@@ -112,7 +153,8 @@ export function renderPeople(el, { household, icons, onSave, onError }) {
         h("div", { class: "person__fields" },
           h("label", { class: "field" }, h("span", { class: "field__label", text: "Name" }), name),
           h("div", { class: "field" }, h("span", { class: "field__label", text: "Colour" }), swatches),
-          h("div", { class: "field" }, h("span", { class: "field__label", text: "Daily goal" }), goal))),
+          h("div", { class: "field" }, h("span", { class: "field__label", text: "Daily goal" }), goal),
+          rewardFields(p, save))),
       pickerOpen ? iconMenu(icons, p.icon, (icon) => { openPicker = null; save(p.id, { icon }); }) : null,
       h("div", { class: "person__actions" },
         h("button", { class: "link-btn", text: pickerOpen ? "Close icons" : "Choose icon", attrs: { type: "button" },
