@@ -27,6 +27,9 @@ files on your own machine.
   the month, quarterly, once a year on March 15, or every 90 days counted from the last time
   it was done (furnace filters). They appear on the calendar ahead of time, with an optional
   "whose turn", and rare ones can stay on the list, marked overdue, until someone does them.
+- **Organised by room.** Each day's chores are grouped into collapsible rooms (Kitchen,
+  Bathroom, Outdoors...) with their own "3 of 5 done" count; finished rooms fold away. Add,
+  rename, reorder and remove rooms in the app, and pick each chore's room from a dropdown.
 - **Edit the chore list in the app**: add, rename, re-icon, change points or "twice a day",
   reorder and remove everyday chores. Removing or changing a chore never erases points
   people already earned with it.
@@ -87,17 +90,21 @@ All optional, as environment variables:
 ### Chores and people
 
 Everything is edited in the app: **People** for who's in the house and their goals, **Chores**
-for the everyday list and the scheduled ones. A new household starts with four sample people
-and the 24 everyday chores in [`config/chores.json`](config/chores.json).
+for the everyday list and the scheduled ones, **Rooms** for how each day's list is grouped. A
+new household starts with four sample people, seven rooms and the 24 everyday chores in
+[`config/chores.json`](config/chores.json).
 
 To start a new household from your own list instead, put a `chores.json` in a folder, mount it,
 and point `CHORE_CONFIG_DIR` at it before the first start (it is not read again after that):
 
 ```json
-{ "chores": [
-  { "id": "dishes",    "name": "Wash dishes", "points": 1, "slotsPerDay": 1, "icon": "🍽️" },
-  { "id": "feed-pets", "name": "Feed pets",   "points": 1, "slotsPerDay": 2 }
-] }
+{
+  "rooms": [ { "id": "kitchen", "name": "Kitchen", "icon": "🍳" } ],
+  "chores": [
+    { "id": "dishes",    "name": "Wash dishes", "points": 1, "slotsPerDay": 1, "icon": "🍽️", "room": "kitchen" },
+    { "id": "feed-pets", "name": "Feed pets",   "points": 1, "slotsPerDay": 2 }
+  ]
+}
 ```
 
 `slotsPerDay: 2` means two people can each do it once a day (or one person twice).
@@ -134,7 +141,7 @@ python3 server.py --port 8420 --data ./data
 ## Development
 
 ```bash
-npm test     # 94 JavaScript tests (node --test) + 32 Python server tests; no dependencies to install
+npm test     # 96 JavaScript tests (node --test) + 36 Python server tests; no dependencies to install
 npm start    # http://127.0.0.1:8420/ with data in ./data
 ```
 
@@ -145,7 +152,7 @@ The front end is plain HTML, CSS and ES modules with no build step:
 | `server.py` | HTTP server, JSON API, storage, validation |
 | `js/main.js` | Routing, data loading, polling |
 | `js/views.js` | Month, week, day views and scoreboard |
-| `js/settings.js` | People and Chores pages |
+| `js/settings.js` | People, Chores and Rooms pages |
 | `js/stats.js` | Scores page: weekly standings, rewards, earlier weeks |
 | `js/theme.js` | Light/dark switch (loaded before first paint) |
 | `js/schedule.js` | Repeat rules (`occursOn`, `describeRule`, `nextOccurrence`) |

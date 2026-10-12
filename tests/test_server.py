@@ -199,13 +199,80 @@ class ServerTest(unittest.TestCase):
         chores = self.call("/api/household")[1]["chores"]
         self.assertEqual(len(chores), 24)
         self.assertEqual(chores[0], {"id": "laundry-wash", "name": "Laundry - wash & dry", "icon": None,
-                                     "points": 2, "slotsPerDay": 1, "archived": False})
+                                     "points": 2, "slotsPerDay": 1, "room": "laundry", "archived": False})
         # A household saved before the chore editor picks up the config list, ids unchanged.
         path = Path(self.tmp.name) / "household.json"
         house = json.loads(path.read_text())
         del house["chores"]
         path.write_text(json.dumps(house))
         self.assertEqual(server.Store(self.tmp.name).household()["chores"][0]["id"], "laundry-wash")
+
+    def test_rooms_seeded_and_migrated(self):
+        house = self.call("/api/household")[1]
+        self.assertEqual([r["id"] for r in house["rooms"]], ["kitchen", "living", "bathroom", "bedrooms", "laundry", "outdoors", "house"])
+        self.assertEqual(next(c for c in house["chores"] if c["id"] == "wash-dishes")["room"], "kitchen")
+        # A household saved before rooms: default rooms appear, starter chores land in their room,
+        # chores added by the household have no room, and nothing else changes.
+        self.call("/api/chores", {"name": "Walk the dog", "points": 1})
+        path = Path(self.tmp.name) / "household.json"
+        old = json.loads(path.read_text())
+        del old["rooms"]
+        for c in old["chores"]:
+            c.pop("room", None)
+        old["chores"][0]["name"] = "Washing"
+        path.write_text(json.dumps(old))
+        house = server.Store(self.tmp.name).household()
+        self.assertEqual(len(house["rooms"]), 7)
+        rooms = {c["id"]: c["room"] for c in house["chores"]}
+        self.assertEqual((rooms["laundry-wash"], rooms["trash"]), ("laundry", "house"))
+        self.assertIsNone(house["chores"][-1]["room"])
+        self.assertEqual(house["chores"][0]["name"], "Washing")
+
+    def test_room_guesses_for_household_chores_on_migration(self):
+        self.call("/api/chores", {"name": "Wipe down oven", "points": 1})
+        self.call("/api/chores", {"name": "Spiritual cleanse", "points": 1})
+        self.call("/api/schedules", {"name": "Sweep front porch", "icon": "🧹", "points": 1, "assignee": None,
+                                     "rule": {"type": "weekly", "every": 1, "weekdays": [6], "start": "2026-10-01"}})
+        path = Path(self.tmp.name) / "household.json"
+        old = json.loads(path.read_text())
+        del old["rooms"]
+        for item in old["chores"] + old["schedules"]:
+            item.pop("room", None)
+        path.write_text(json.dumps(old))
+        house = server.Store(self.tmp.name).household()
+        self.assertEqual([c["room"] for c in house["chores"][-2:]], ["kitchen", None])
+        self.assertEqual(house["schedules"][0]["room"], "outdoors")
+        # Guessing only happens once: a chore moved to no room stays there.
+        self.assertEqual(server.guess_room("Vacuum Jamie’s Room", {"bedrooms", "house"}), "bedrooms")
+        self.assertEqual(server.guess_room("Vacuum the living room", {"living", "house"}), "living")
+
+    def test_rooms_add_edit_order_remove(self):
+        house = self.call("/api/rooms", {"name": "Garage", "icon": "🚗"})[1]
+        garage = house["rooms"][-1]
+        self.assertEqual((garage["name"], garage["icon"]), ("Garage", "🚗"))
+        self.assertEqual(self.call(f"/api/rooms/{garage['id']}", {"name": "Garage & shed"})[1]["rooms"][-1]["name"], "Garage & shed")
+        chore = self.call("/api/chores", {"name": "Sweep garage", "points": 1, "room": garage["id"]})[1]["chores"][-1]
+        self.assertEqual(chore["room"], garage["id"])
+        sched = self.call("/api/schedules", {"name": "Mow", "icon": "🌱", "points": 2, "assignee": None, "room": "outdoors",
+                                             "rule": {"type": "weekly", "every": 1, "weekdays": [6], "start": "2026-10-01"}})[1]["schedules"][-1]
+        self.assertEqual(sched["room"], "outdoors")
+        ids = [r["id"] for r in self.call("/api/household")[1]["rooms"]]
+        self.assertEqual([r["id"] for r in self.call("/api/room-order", {"ids": ids[::-1]})[1]["rooms"]], ids[::-1])
+        self.assertEqual(self.call("/api/room-order", {"ids": ids[1:]})[0], 400)
+        # Removing a room leaves its chores in place, with no room.
+        house = self.call(f"/api/rooms/{garage['id']}", {"remove": True})[1]
+        self.assertNotIn(garage["id"], [r["id"] for r in house["rooms"]])
+        self.assertIsNone(next(c for c in house["chores"] if c["id"] == chore["id"])["room"])
+        house = self.call("/api/rooms/outdoors", {"remove": True})[1]
+        self.assertIsNone(next(x for x in house["schedules"] if x["id"] == sched["id"])["room"])
+
+    def test_room_validation(self):
+        for bad in ({"name": "", "icon": "🚗"}, {"name": "x" * 31, "icon": "🚗"}, {"name": "Den", "icon": "<i>"}):
+            self.assertEqual(self.call("/api/rooms", bad)[0], 400, bad)
+        self.assertEqual(self.call("/api/rooms/nope", {"name": "X"})[0], 404)
+        self.assertEqual(self.call("/api/chores", {"name": "X", "points": 1, "room": "attic"})[0], 400)
+        house = self.call("/api/chores/trash", {"room": None})[1]
+        self.assertIsNone(next(c for c in house["chores"] if c["id"] == "trash")["room"])
 
     def test_everyday_chores_add_edit_remove(self):
         house = self.call("/api/chores", {"name": "Walk the dog", "icon": "🐾", "points": 2, "slotsPerDay": 2})[1]

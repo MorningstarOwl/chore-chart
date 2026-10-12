@@ -70,3 +70,18 @@ export function saveChore(id, fields) {
 export function orderChores(ids) {
   return post("api/chore-order", { ids });
 }
+
+/** Create (no id) or update a room; resolves to the whole household. */
+export function saveRoom(id, fields) {
+  return post(id ? `api/rooms/${id}` : "api/rooms", fields);
+}
+
+/** Delete a room; its chores move to "no room". */
+export function removeRoom(id) {
+  return post(`api/rooms/${id}`, { remove: true });
+}
+
+/** Put the rooms in this order (every id, once). */
+export function orderRooms(ids) {
+  return post("api/room-order", { ids });
+}

@@ -27,12 +27,15 @@ API (all JSON):
   POST /api/day/YYYY-MM-DD   body {"op": "claim"|"release"|"clear"|"undo", "slotId", "participantId"}
                              -> the updated day; 409 if the op no longer applies (someone beat you to it).
                              Claims on days after tomorrow (server time) are refused: chores are logged, not planned.
-  GET  /api/household        -> {"people": [...], "chores": [...], "schedules": [...], "lastDone": {...}}
+  GET  /api/household        -> {"people": [...], "rooms": [...], "chores": [...], "schedules": [...], "lastDone": {...}}
                              (archived entries included; lastDone = latest day each schedule was done)
   POST /api/people           body {"name", "color", "icon", "goal"?} -> household; adds a person (goal 1-20, default 5)
   POST /api/people/ID        body with any of name/color/icon/goal/weeklyTarget/reward/archived -> household
                              (weeklyTarget null = daily goal x 7; reward = what they're working towards)
-  POST /api/chores           body {"name", "icon"?, "points", "slotsPerDay"} -> household; adds an everyday chore
+  POST /api/rooms            body {"name", "icon"} -> household; adds a room
+  POST /api/rooms/ID         body with name/icon -> household; {"remove": true} deletes it (its chores move to no room)
+  POST /api/room-order       body {"ids": [...]} -> household; rooms in this order
+  POST /api/chores           body {"name", "icon"?, "points", "slotsPerDay", "room"?} -> household; adds an everyday chore
   POST /api/chores/ID        body with any of name/icon/points/slotsPerDay/archived -> household
   POST /api/chore-order      body {"ids": [...]} -> household; the everyday list in this order
   POST /api/schedules        body {"name", "icon", "points", "assignee", "rule", "carryOver"?} -> household
@@ -161,8 +164,62 @@ def check_person(body, current=None):
     return out
 
 
-def check_chore(body, current=None):
-    """An everyday chore. icon is optional (None = no icon)."""
+def _room(body, rooms):
+    """A room id from the household's list, or None for "no room"."""
+    room = body.get("room") or None
+    if room is not None and room not in rooms:
+        raise ValueError("pick a room from the list")
+    return room
+
+
+def check_room(body, current=None):
+    out = dict(current or {})
+    if "name" in body or current is None:
+        out["name"] = _text(body.get("name"), "name", 30)
+    if "icon" in body or current is None:
+        if body.get("icon") not in allowed_icons():
+            raise ValueError("pick an icon from the menu")
+        out["icon"] = body["icon"]
+    return out
+
+
+# Used once, when a household from before rooms is first loaded: a best guess at each chore's room
+# from its name, tried in this order (so "Sweep porch" is Outdoors before "sweep" says house).
+ROOM_GUESSES = [
+    ("laundry", r"laundr|washing machine|dryer"),
+    ("living", r"living room|couch|sofa"),
+    ("kitchen", r"kitchen|dish|oven|fridge|refrigerator|microwave|counter|dinner|lunch|breakfast|cook|garbage disposal"),
+    ("bathroom", r"bath|toilet|tub|shower|mirror|sink"),
+    ("bedrooms", r"\bbed|bedroom|\w['’]?s room\b"),
+    ("outdoors", r"lawn|porch|yard|garden|gutter|\bmow|patio|deck|driveway"),
+    ("house", r"trash|garbage|recycl|vacuum|\bmop|sweep|dust|plant|pet|litter|entry|hall|window|mail|furnace|filter"),
+]
+
+
+def guess_room(name, room_ids):
+    for room, pattern in ROOM_GUESSES:
+        if room in room_ids and re.search(pattern, name, re.IGNORECASE):
+            return room
+    return None
+
+
+def config_seed():
+    """config/chores.json (or $CHORE_CONFIG_DIR/chores.json): the starting rooms and everyday list."""
+    return json.loads(config_path("chores.json").read_text())
+
+
+def seed_rooms():
+    out = []
+    for r in config_seed().get("rooms") or []:
+        try:
+            out.append({"id": r["id"], **check_room(r)})
+        except (KeyError, ValueError, TypeError) as err:
+            print(f"chores.json: skipping room {r!r}: {err}", flush=True)
+    return out
+
+
+def check_chore(body, current=None, rooms=frozenset()):
+    """An everyday chore. icon is optional (None = no icon); room is a room id or None."""
     out = dict(current or {})
     if "name" in body or current is None:
         out["name"] = _text(body.get("name"), "name", 40)
@@ -175,17 +232,20 @@ def check_chore(body, current=None):
         out["points"] = _int(body.get("points"), "points", 1, 10)
     if "slotsPerDay" in body or current is None:
         out["slotsPerDay"] = _int(body.get("slotsPerDay", 1), "times per day", 1, 4)
+    if "room" in body or current is None:
+        out["room"] = _room(body, rooms)
     if "archived" in body:
         out["archived"] = bool(body["archived"])
     return out
 
 
-def seed_chores():
+def seed_chores(rooms):
     """The starting everyday list, from config/chores.json (or $CHORE_CONFIG_DIR/chores.json)."""
     out = []
-    for c in json.loads(config_path("chores.json").read_text())["chores"]:
+    for c in config_seed()["chores"]:
         try:
-            out.append({"id": c["id"], **check_chore({**c, "icon": c.get("icon")}), "archived": False})
+            room = c.get("room") if c.get("room") in rooms else None
+            out.append({"id": c["id"], **check_chore({**c, "icon": c.get("icon"), "room": room}, rooms=rooms), "archived": False})
         except (KeyError, ValueError, TypeError) as err:
             print(f"chores.json: skipping {c!r}: {err}", flush=True)
     return out
@@ -223,7 +283,7 @@ def check_rule(rule):
     return out
 
 
-def check_schedule(body, active_people, current=None):
+def check_schedule(body, active_people, current=None, rooms=frozenset()):
     out = dict(current or {})
     if "name" in body or current is None:
         out["name"] = _text(body.get("name"), "name", 40)
@@ -242,6 +302,8 @@ def check_schedule(body, active_people, current=None):
         out["rule"] = check_rule(body.get("rule"))
     if "carryOver" in body or current is None:
         out["carryOver"] = bool(body.get("carryOver"))
+    if "room" in body or current is None:
+        out["room"] = _room(body, rooms)
     if "archived" in body:
         out["archived"] = bool(body["archived"])
     return out
@@ -320,7 +382,8 @@ class Store:
         people = [{"id": p["id"], "name": p["name"], "color": p.get("color") or SEED_COLORS[i % len(SEED_COLORS)],
                    "icon": SEED_ICONS[i % len(SEED_ICONS)], "goal": DEFAULT_GOAL, "weeklyTarget": None, "reward": None}
                   for i, p in enumerate(seed)]
-        house = {"people": people, "chores": seed_chores(), "schedules": []}
+        rooms = seed_rooms()
+        house = {"people": people, "rooms": rooms, "chores": seed_chores({r["id"] for r in rooms}), "schedules": []}
         write_json(self.house_path, house)
         return house
 
@@ -343,6 +406,17 @@ class Store:
         if not any(not p["archived"] for p in people):
             raise ValueError("household has nobody in it")
         active = {p["id"] for p in people if not p["archived"]}
+        migrating_rooms = raw.get("rooms") is None
+        if migrating_rooms:
+            # Households from before rooms: start with the default rooms.
+            rooms = seed_rooms()
+        else:
+            rooms = []
+            for r in raw["rooms"]:
+                if isinstance(r, dict) and isinstance(r.get("id"), str):
+                    rooms.append({"id": r["id"], **check_room({**r, "icon": r.get("icon") if r.get("icon") in icons else "🏠"})})
+        room_ids = {r["id"] for r in rooms}
+        keep_room = lambda v: v if v in room_ids else None  # noqa: E731
         schedules = []
         for sch in raw.get("schedules") or []:
             if isinstance(sch, dict) and isinstance(sch.get("id"), str):
@@ -351,17 +425,21 @@ class Store:
                     body["icon"] = "🧹"
                 if body.get("assignee") not in active:
                     body["assignee"] = None
-                schedules.append({"id": sch["id"], **check_schedule(body, active), "archived": bool(sch.get("archived"))})
+                body["room"] = guess_room(sch.get("name", ""), room_ids) if migrating_rooms else keep_room(body.get("room"))
+                schedules.append({"id": sch["id"], **check_schedule(body, active, rooms=room_ids), "archived": bool(sch.get("archived"))})
         if raw.get("chores") is None:
             # Households from before the chore editor: their list was config/chores.json.
-            chores = seed_chores()
+            chores = seed_chores(room_ids)
         else:
+            # Before rooms existed, chores that came from the starter list go to their starter room.
+            starter = {c["id"]: c.get("room") for c in config_seed()["chores"]} if migrating_rooms else {}
             chores = []
             for c in raw["chores"]:
                 if isinstance(c, dict) and isinstance(c.get("id"), str):
-                    body = {**c, "icon": c.get("icon") if c.get("icon") in icons else None}
-                    chores.append({"id": c["id"], **check_chore(body), "archived": bool(c.get("archived"))})
-        return {"people": people, "chores": chores, "schedules": schedules}
+                    room = (starter.get(c["id"]) or guess_room(c.get("name", ""), room_ids)) if migrating_rooms else c.get("room")
+                    body = {**c, "icon": c.get("icon") if c.get("icon") in icons else None, "room": keep_room(room)}
+                    chores.append({"id": c["id"], **check_chore(body, rooms=room_ids), "archived": bool(c.get("archived"))})
+        return {"people": people, "rooms": rooms, "chores": chores, "schedules": schedules}
 
     def household(self):
         """The household plus lastDone: {scheduleId: latest day it was done}, for repeats counted
@@ -402,9 +480,45 @@ class Store:
             write_json(self.house_path, self.house)
         return self.household()
 
+    def _room_ids(self):
+        return {r["id"] for r in self.house["rooms"]}
+
+    def add_room(self, body):
+        with self.lock:
+            self.house["rooms"].append({"id": f"r-{secrets.token_hex(4)}", **check_room(body)})
+            write_json(self.house_path, self.house)
+        return self.household()
+
+    def update_room(self, rid, body):
+        """Rename/re-icon a room, or {"remove": true} to delete it; its chores move to "no room"."""
+        with self.lock:
+            room = next((r for r in self.house["rooms"] if r["id"] == rid), None)
+            if room is None:
+                raise KeyError("no such room")
+            if body.get("remove"):
+                self.house["rooms"].remove(room)
+                for item in self.house["chores"] + self.house["schedules"]:
+                    if item.get("room") == rid:
+                        item["room"] = None
+            else:
+                room.update(check_room(body, room))
+            write_json(self.house_path, self.house)
+        return self.household()
+
+    def order_rooms(self, body):
+        ids = body.get("ids")
+        with self.lock:
+            current = [r["id"] for r in self.house["rooms"]]
+            if not isinstance(ids, list) or sorted(ids) != sorted(current):
+                raise ValueError("ids must list every room exactly once")
+            by_id = {r["id"]: r for r in self.house["rooms"]}
+            self.house["rooms"] = [by_id[i] for i in ids]
+            write_json(self.house_path, self.house)
+        return self.household()
+
     def add_chore(self, body):
         with self.lock:
-            chore = {"id": f"c-{secrets.token_hex(4)}", **check_chore(body), "archived": False}
+            chore = {"id": f"c-{secrets.token_hex(4)}", **check_chore(body, rooms=self._room_ids()), "archived": False}
             self.house["chores"].append(chore)
             write_json(self.house_path, self.house)
         return self.household()
@@ -414,7 +528,7 @@ class Store:
             chore = next((c for c in self.house["chores"] if c["id"] == cid), None)
             if chore is None:
                 raise KeyError("no such chore")
-            chore.update(check_chore(body, chore))
+            chore.update(check_chore(body, chore, rooms=self._room_ids()))
             write_json(self.house_path, self.house)
         return self.household()
 
@@ -431,7 +545,7 @@ class Store:
 
     def add_schedule(self, body):
         with self.lock:
-            sch = {"id": f"s-{secrets.token_hex(4)}", **check_schedule(body, self._active_people()), "archived": False}
+            sch = {"id": f"s-{secrets.token_hex(4)}", **check_schedule(body, self._active_people(), rooms=self._room_ids()), "archived": False}
             self.house["schedules"].append(sch)
             write_json(self.house_path, self.house)
         return self.household()
@@ -441,7 +555,7 @@ class Store:
             sch = next((x for x in self.house["schedules"] if x["id"] == sid), None)
             if sch is None:
                 raise KeyError("no such scheduled chore")
-            sch.update(check_schedule(body, self._active_people(), sch))
+            sch.update(check_schedule(body, self._active_people(), sch, rooms=self._room_ids()))
             write_json(self.house_path, self.house)
         return self.household()
 
@@ -593,11 +707,15 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("expected a JSON object")
             if self.path == "/api/chore-order":
                 return self._send(200, self.store.order_chores(body))
-            m = re.fullmatch(r"/api/(people|chores|schedules)(?:/([\w-]{1,40}))?", self.path)
+            if self.path == "/api/room-order":
+                return self._send(200, self.store.order_rooms(body))
+            m = re.fullmatch(r"/api/(people|rooms|chores|schedules)(?:/([\w-]{1,40}))?", self.path)
             if m:
                 kind, ident = m.groups()
                 if kind == "people":
                     house = self.store.update_person(ident, body) if ident else self.store.add_person(body)
+                elif kind == "rooms":
+                    house = self.store.update_room(ident, body) if ident else self.store.add_room(body)
                 elif kind == "chores":
                     house = self.store.update_chore(ident, body) if ident else self.store.add_chore(body)
                 else:

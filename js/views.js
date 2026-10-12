@@ -5,6 +5,7 @@
 // `who` maps every id ever seen (archived included) to {name, icon, color} for history.
 
 import { goalOf, fromKey, doneList, inkFor } from "./calendar.js";
+import { groupByRoom } from "./schedule.js";
 
 /** h("div", {class, text, attrs, on}, ...children) */
 export function h(tag, props = {}, ...children) {
@@ -241,7 +242,7 @@ function choreRows({ chores, claimed, people, who, future, onToggle }) {
         on: { click: () => onToggle(slotId, p.id, by !== p.id) },
       }, h("span", { class: "who__icon", text: p.icon, attrs: { "aria-hidden": "true" } }),
         h("span", { class: "who__name", text: p.name })));
-      const pts = `${chore.points} pt${chore.points > 1 ? "s" : ""}`;
+      const pts = `${chore.scheduled ? "📅 " : ""}${chore.points} pt${chore.points > 1 ? "s" : ""}`;
       const meta = by ? `${pts} · done by ${nameOf(who, by)}`
         : chore.overdueSince ? `${pts} · overdue since ${dayAndDate(chore.overdueSince)}`
         : chore.assignee && who[chore.assignee] ? `${pts} · ${who[chore.assignee].name}'s turn` : pts;
@@ -259,24 +260,62 @@ function choreRows({ chores, claimed, people, who, future, onToggle }) {
   return rows;
 }
 
-export function renderDay(el, { key, todayKey, daily, scheduled, people, who, day, onToggle, onUndo, onReset }) {
+// Which room sections someone opened or closed by hand, per day, so a redraw keeps them that way.
+const roomOpen = new Map();
+
+/** One collapsible room on the day page. Closed by default once everything in it is done. */
+function roomSection(dayKey, group, rows, fallbackName) {
+  const done = rows.filter((r) => r.classList.contains("chore--done")).length;
+  const overdue = rows.filter((r) => r.classList.contains("chore--overdue")).length;
+  const allDone = done === rows.length;
+  const id = group.room ? group.room.id : "_none";
+  const stateKey = `${dayKey}|${id}`;
+  const open = roomOpen.has(stateKey) ? roomOpen.get(stateKey) : !allDone || overdue > 0;
+  const name = group.room ? group.room.name : fallbackName;
+  const details = h("details", { class: `room${allDone ? " room--done" : ""}`, attrs: { open } },
+    h("summary", { class: "room__head" },
+      h("span", { class: "room__icon", text: group.room ? group.room.icon : "📋", attrs: { "aria-hidden": "true" } }),
+      h("span", { class: "room__name", text: name }),
+      overdue ? h("span", { class: "room__overdue", text: `${overdue} overdue` }) : null,
+      h("span", { class: "room__count", text: allDone ? `✓ all ${rows.length} done` : `${done} of ${rows.length} done` })),
+    h("ul", { class: "chores", attrs: { "aria-label": `${name} chores` } }, rows));
+  details.addEventListener("toggle", () => roomOpen.set(stateKey, details.open));
+  return details;
+}
+
+export function renderDay(el, { key, todayKey, daily, scheduled, rooms = [], people, who, day, onToggle, onUndo, onReset }) {
   const claimed = day.claimed || {};
   const future = key > todayKey;
   const common = { claimed, people, who, future, onToggle };
+  const doneCount = Object.keys(claimed).length;
+  const bar = h("div", { class: "dayview__bar" },
+    h("p", { class: "dayview__count" }),
+    future ? null : h("div", { class: "dayview__actions" },
+      h("button", { text: "Undo last change", attrs: { type: "button", disabled: !(day.log && day.log.length) }, on: { click: onUndo } }),
+      h("button", { text: "Reset day", attrs: { type: "button", disabled: !doneCount }, on: { click: onReset } })));
+  const setCount = (total) => {
+    bar.firstChild.textContent = future ? "Coming up. Chores can be logged on the day." : `${doneCount} of ${total} chores done`;
+  };
+
+  if (rooms.length) {
+    // Everything for a room together: its scheduled chores first, then the everyday ones.
+    const groups = groupByRoom([...scheduled, ...daily], rooms)
+      .map((g) => ({ group: g, rows: choreRows({ ...common, chores: g.items }) }))
+      .filter((g) => g.rows.length);
+    setCount(groups.reduce((n, g) => n + g.rows.length, 0));
+    fill(el, bar, h("div", { class: "rooms" }, groups.map((g) => roomSection(key, g.group, g.rows, "Other"))));
+    return;
+  }
+
+  // No rooms set up: the scheduled list, then the everyday list, as before rooms existed.
   const schedRows = choreRows({ ...common, chores: scheduled });
   const dailyRows = choreRows({ ...common, chores: daily });
-  const doneCount = Object.keys(claimed).length;
-  const total = schedRows.length + dailyRows.length;
-  fill(el,
-    h("div", { class: "dayview__bar" },
-      h("p", { class: "dayview__count", text: future ? "Coming up. Chores can be logged on the day." : `${doneCount} of ${total} chores done` }),
-      future ? null : h("div", { class: "dayview__actions" },
-        h("button", { text: "Undo last change", attrs: { type: "button", disabled: !(day.log && day.log.length) }, on: { click: onUndo } }),
-        h("button", { text: "Reset day", attrs: { type: "button", disabled: !doneCount }, on: { click: onReset } }))),
+  setCount(schedRows.length + dailyRows.length);
+  fill(el, bar,
     schedRows.length ? h("section", { class: "dayview__section" },
       h("h2", { class: "section-title", text: "Scheduled" }),
       h("ul", { class: "chores", attrs: { "aria-label": `Scheduled chores for ${longDate(key)}` } }, schedRows)) : null,
-    h("section", { class: "dayview__section" },
+    dailyRows.length ? h("section", { class: "dayview__section" },
       h("h2", { class: "section-title", text: "Every day" }),
-      h("ul", { class: "chores", attrs: { "aria-label": `Everyday chores for ${longDate(key)}` } }, dailyRows)));
+      h("ul", { class: "chores", attrs: { "aria-label": `Everyday chores for ${longDate(key)}` } }, dailyRows)) : null);
 }

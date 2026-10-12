@@ -137,7 +137,7 @@ export function describeRule(rule) {
 
 /** A schedule as a chore the scoring code understands: one slot, id "sched:<id>". */
 export function scheduleChore(s, extra) {
-  return { id: `sched:${s.id}`, name: s.name, points: s.points, slotsPerDay: 1, icon: s.icon, scheduled: true, assignee: s.assignee, schedule: s, ...extra };
+  return { id: `sched:${s.id}`, name: s.name, points: s.points, slotsPerDay: 1, icon: s.icon, room: s.room || null, scheduled: true, assignee: s.assignee, schedule: s, ...extra };
 }
 
 /**
@@ -186,4 +186,16 @@ export function dailyFor(chores, day) {
 /** Every chore that can score on a day: scheduled ones first, then the everyday list. */
 export function choresForDay(chores, schedules, key, day, history) {
   return [...scheduledFor(schedules, key, day, history), ...dailyFor(chores, day)];
+}
+
+/**
+ * Split chores into rooms, in the household's room order, with chores that have no room (or a
+ * room that no longer exists) last under room null. Empty rooms are left out.
+ * -> [{room: {id, name, icon} | null, items: [...]}]
+ */
+export function groupByRoom(items, rooms) {
+  const known = new Set(rooms.map((r) => r.id));
+  const groups = rooms.map((room) => ({ room, items: items.filter((c) => c.room === room.id) }));
+  groups.push({ room: null, items: items.filter((c) => !known.has(c.room)) });
+  return groups.filter((g) => g.items.length);
 }

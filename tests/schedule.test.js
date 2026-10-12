@@ -1,7 +1,7 @@
 // Repeating chores: when rules fall, how they read, and which chores a day carries.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { occursOn, nextOccurrence, previousOccurrence, overdueSince, describeRule, scheduledFor, choresForDay, dailyFor } from "../js/schedule.js";
+import { occursOn, nextOccurrence, previousOccurrence, overdueSince, describeRule, scheduledFor, choresForDay, dailyFor, groupByRoom } from "../js/schedule.js";
 import { addDays } from "../js/calendar.js";
 
 const days = (rule, from, n) => {
@@ -210,5 +210,23 @@ describe("dailyFor", () => {
   it("so totals still count points earned before an edit", () => {
     const chores = choresForDay(list, [], "2026-10-13", { claimed: { "gone#0": "alex", "pets#1": "sam" } });
     assert.deepEqual(chores.map((c) => c.id), ["dishes", "pets", "gone"]);
+  });
+});
+
+describe("groupByRoom", () => {
+  const rooms = [{ id: "kitchen", name: "Kitchen", icon: "🍳" }, { id: "bath", name: "Bathroom", icon: "🛁" }, { id: "empty", name: "Attic", icon: "🏠" }];
+  const items = [
+    { id: "a", room: "bath" }, { id: "b", room: "kitchen" }, { id: "c", room: null },
+    { id: "d", room: "kitchen" }, { id: "e", room: "gone" },
+  ];
+
+  it("follows the room order, keeps item order within a room, and skips empty rooms", () => {
+    const g = groupByRoom(items, rooms);
+    assert.deepEqual(g.map((x) => [x.room && x.room.id, x.items.map((i) => i.id)]),
+      [["kitchen", ["b", "d"]], ["bath", ["a"]], [null, ["c", "e"]]]);
+  });
+
+  it("puts everything under no room when there are no rooms", () => {
+    assert.deepEqual(groupByRoom(items, []).map((x) => x.room), [null]);
   });
 });

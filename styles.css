@@ -644,6 +644,44 @@ button.danger { color: var(--crit-text); }
 .form__error:empty { display: none; }
 .form__actions { display: flex; gap: var(--space-2); }
 
+/* Rooms on the day page */
+.rooms { display: flex; flex-direction: column; gap: var(--space-3); }
+.room {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+}
+.room[open] { padding-bottom: var(--space-3); }
+.room__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  cursor: pointer;
+  list-style: none;
+  min-height: 52px;
+  border-radius: var(--radius-md);
+}
+.room__head::-webkit-details-marker { display: none; }
+.room__head::after { content: "▾"; margin-left: var(--space-2); color: var(--muted); transition: transform 0.15s ease; }
+.room:not([open]) .room__head::after { transform: rotate(-90deg); }
+.room__head:hover { background: var(--surface-2); }
+.room__icon { font-size: 26px; line-height: 1; }
+.room__name { font-weight: 700; font-size: var(--text-lg); flex: 1; }
+.room__count { color: var(--muted); font-size: var(--text-sm); font-weight: 600; }
+.room__overdue { color: var(--crit-text); background: var(--crit-bg); border: 1px solid var(--crit-border); border-radius: var(--radius-full); padding: 2px 10px; font-size: var(--text-xs); font-weight: 700; }
+.room--done .room__count { color: var(--text); }
+.room--done .room__name::after { content: " ✓"; }
+.room > .chores { padding: 0 var(--space-3); }
+
+/* Rooms grouping on the Chores page */
+.room-groups { display: flex; flex-direction: column; gap: var(--space-4); }
+.room-group__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-2); }
+.room-group__title { font-size: var(--text-base); }
+.room-group__count { color: var(--muted); font-weight: 400; }
+.field__link { text-transform: none; letter-spacing: 0; font-weight: 600; color: var(--accent); margin-left: 4px; }
+
 /* Scores */
 .stats__head { margin-bottom: var(--space-3); }
 .stats__note { color: var(--muted); font-weight: 600; }
@@ -741,8 +779,10 @@ button.danger { color: var(--crit-text); }
   .bars__track { width: 100%; max-width: 28px; height: 56px; }
   .daily-item { flex-wrap: wrap; }
   .daily-item__actions { width: 100%; justify-content: flex-end; }
-  .seg--menu { width: 100%; }
-  .seg--menu a { flex: 1; }
+  .seg--menu { width: 100%; flex-wrap: wrap; border-radius: var(--radius-md); }
+  .seg--menu a { flex: 1 1 40%; }
+  .room__head { padding: var(--space-3); }
+  .room > .chores { padding: 0 var(--space-2); }
   .sched-form { padding: var(--space-4); }
   .chore__icon { font-size: 22px; }
   .chore { padding-left: var(--space-3); }

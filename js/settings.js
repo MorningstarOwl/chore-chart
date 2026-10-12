@@ -2,7 +2,7 @@
 
 import { h, fill, avatar, tint, when } from "./views.js";
 import { PALETTE, addDays, goalOf } from "./calendar.js";
-import { describeRule, nextOccurrence, overdueSince, MONTHS } from "./schedule.js";
+import { describeRule, nextOccurrence, overdueSince, MONTHS, groupByRoom } from "./schedule.js";
 
 const SWATCHES = [...PALETTE, "#e85d75", "#00a6a6", "#f4a261", "#2b2d42", "#8e7dbe", "#4d908e"];
 const GOAL_MIN = 1;
@@ -13,10 +13,11 @@ const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "
 let openPicker = null; // id of the person whose icon menu is open, kept across re-renders
 let scheduleDraft = null; // the schedule form's working copy while it is open
 let choreDraft = null; // the everyday-chore form's working copy while it is open
+let roomDraft = null; // the room form's working copy while it is open
 
 /** True while a form is mid-edit, so a background refresh must not redraw over it. */
 export function settingsBusy() {
-  return scheduleDraft !== null || choreDraft !== null;
+  return scheduleDraft !== null || choreDraft !== null || roomDraft !== null;
 }
 
 /* ---------- Icon menu ---------- */
@@ -214,14 +215,14 @@ function ruleDefaults(todayKey) {
 
 function blankDraft(todayKey) {
   return {
-    id: null, name: "", icon: "🗑️", points: 1, assignee: null, carryOver: false, carryOverTouched: false,
+    id: null, name: "", icon: "🗑️", points: 1, assignee: null, room: null, carryOver: false, carryOverTouched: false,
     rule: { type: "weekly", ...ruleDefaults(todayKey) },
   };
 }
 
 function draftFrom(s, todayKey) {
   return {
-    id: s.id, name: s.name, icon: s.icon, points: s.points, assignee: s.assignee,
+    id: s.id, name: s.name, icon: s.icon, points: s.points, assignee: s.assignee, room: s.room || null,
     carryOver: !!s.carryOver, carryOverTouched: true,
     rule: { ...ruleDefaults(todayKey), ...s.rule },
   };
@@ -242,7 +243,7 @@ function select(options, value, onChange, label) {
 }
 
 function scheduleForm(ctx) {
-  const { icons, people, todayKey, lastDone, onSave, onCancel } = ctx;
+  const { icons, people, rooms, todayKey, lastDone, onSave, onCancel } = ctx;
   const d = scheduleDraft;
   const preview = h("p", { class: "form__preview", attrs: { "aria-live": "polite" } });
   const error = h("p", { class: "form__error", attrs: { role: "alert" } });
@@ -373,7 +374,7 @@ function scheduleForm(ctx) {
         e.preventDefault();
         error.textContent = "";
         try {
-          await onSave(d.id, { name: d.name, icon: d.icon, points: d.points, assignee: d.assignee, rule: cleanRule(d.rule), carryOver: d.carryOver });
+          await onSave(d.id, { name: d.name, icon: d.icon, points: d.points, assignee: d.assignee, room: d.room || null, rule: cleanRule(d.rule), carryOver: d.carryOver });
         } catch (err) {
           error.textContent = err.message;
         }
@@ -400,7 +401,8 @@ function scheduleForm(ctx) {
       h("label", { class: "field" }, h("span", { class: "field__label", text: "Points" }),
         select([1, 2, 3, 4, 5, 6, 8, 10].map((n) => [n, String(n)]), d.points, (v) => { d.points = Number(v); }, "Points")),
       h("label", { class: "field" }, h("span", { class: "field__label", text: "Whose turn" }),
-        select([["", "Anyone"], ...people.map((p) => [p.id, `${p.icon} ${p.name}`])], d.assignee || "", (v) => { d.assignee = v || null; }, "Whose turn"))),
+        select([["", "Anyone"], ...people.map((p) => [p.id, `${p.icon} ${p.name}`])], d.assignee || "", (v) => { d.assignee = v || null; }, "Whose turn")),
+      roomField(rooms, d.room, (v) => { d.room = v; })),
     h("div", { class: "form__row" },
       h("label", { class: "check" }, carry, h("span", { text: "Keep it on the list until it's done" })),
       h("p", { class: "form__hint", text: "If nobody does it on the day, it stays on today's list, marked overdue, until someone does." })),
@@ -419,7 +421,18 @@ function scheduleForm(ctx) {
 const TIMES = [[1, "once a day"], [2, "twice a day"], [3, "3 times a day"], [4, "4 times a day"]];
 const timesText = (n) => (TIMES.find(([v]) => v === n) || [n, `${n} times a day`])[1];
 
-function choreForm({ icons, onSave, onCancel }) {
+/** Room dropdown for the chore forms. Changes go to onChange(roomId | null). */
+function roomSelect(rooms, value, onChange) {
+  return select([["", "No room"], ...rooms.map((r) => [r.id, `${r.icon} ${r.name}`])], value || "", (v) => onChange(v || null), "Room");
+}
+
+function roomField(rooms, value, onChange) {
+  return h("label", { class: "field" },
+    h("span", { class: "field__label" }, "Room ", h("a", { class: "field__link", text: "edit rooms", attrs: { href: "#rooms" } })),
+    roomSelect(rooms, value, onChange));
+}
+
+function choreForm({ icons, rooms, onSave, onCancel }) {
   const d = choreDraft;
   const error = h("p", { class: "form__error", attrs: { role: "alert" } });
   const iconSlot = h("div");
@@ -439,7 +452,7 @@ function choreForm({ icons, onSave, onCancel }) {
         e.preventDefault();
         error.textContent = "";
         try {
-          await onSave(d.id, { name: d.name, icon: d.icon, points: d.points, slotsPerDay: d.slotsPerDay });
+          await onSave(d.id, { name: d.name, icon: d.icon, points: d.points, slotsPerDay: d.slotsPerDay, room: d.room || null });
         } catch (err) {
           error.textContent = err.message;
         }
@@ -457,6 +470,7 @@ function choreForm({ icons, onSave, onCancel }) {
         }))),
     iconSlot,
     h("div", { class: "form__row form__row--split" },
+      roomField(rooms, d.room, (v) => { d.room = v; }),
       h("label", { class: "field" }, h("span", { class: "field__label", text: "Points" }),
         select(Array.from({ length: 10 }, (_, i) => [i + 1, String(i + 1)]), d.points, (v) => { d.points = Number(v); }, "Points")),
       h("label", { class: "field" }, h("span", { class: "field__label", text: "How many times a day" }),
@@ -469,46 +483,60 @@ function choreForm({ icons, onSave, onCancel }) {
 }
 
 function everydaySection({ household, icons, onSaveChore, onOrder, onError, redraw }) {
+  const rooms = household.rooms || [];
   const active = household.chores.filter((c) => !c.archived);
   const removed = household.chores.filter((c) => c.archived);
   const ctx = {
-    icons,
+    icons, rooms,
     onSave: async (id, fields) => { await onSaveChore(id, fields); choreDraft = null; redraw(); },
     onCancel: () => { choreDraft = null; redraw(); },
   };
   const act = async (fn) => { try { await fn(); } catch (err) { onError(err.message); } };
-  const move = (i, by) => {
+  // Arrows move a chore past its neighbour in the same room.
+  const swap = (a, b) => {
     const ids = household.chores.map((c) => c.id);
-    const from = ids.indexOf(active[i].id), to = ids.indexOf(active[i + by].id);
-    [ids[from], ids[to]] = [ids[to], ids[from]];
+    const i = ids.indexOf(a.id), j = ids.indexOf(b.id);
+    [ids[i], ids[j]] = [ids[j], ids[i]];
     act(() => onOrder(ids));
   };
+  const startAdding = (room) => { choreDraft = { id: null, name: "", icon: null, points: 1, slotsPerDay: 1, room }; redraw(); };
 
-  const rows = active.map((c, i) => choreDraft && choreDraft.id === c.id ? h("li", {}, choreForm(ctx)) : h("li", { class: "daily-item" },
+  const itemRow = (c, i, list) => choreDraft && choreDraft.id === c.id ? h("li", {}, choreForm(ctx)) : h("li", { class: "daily-item" },
     h("span", { class: "daily-item__icon", text: c.icon || "", attrs: { "aria-hidden": "true" } }),
     h("div", { class: "daily-item__body" },
       h("div", { class: "daily-item__name", text: c.name }),
       h("div", { class: "daily-item__meta", text: `${c.points} pt${c.points > 1 ? "s" : ""} · ${timesText(c.slotsPerDay)}` })),
     h("div", { class: "daily-item__actions" },
-      h("button", { class: "icon-btn", text: "↑", attrs: { type: "button", "aria-label": `Move ${c.name} up`, disabled: i === 0 }, on: { click: () => move(i, -1) } }),
-      h("button", { class: "icon-btn", text: "↓", attrs: { type: "button", "aria-label": `Move ${c.name} down`, disabled: i === active.length - 1 }, on: { click: () => move(i, 1) } }),
-      h("button", { text: "Edit", attrs: { type: "button", "aria-label": `Edit ${c.name}` }, on: { click: () => { choreDraft = { ...c }; redraw(); } } }),
+      h("button", { class: "icon-btn", text: "↑", attrs: { type: "button", "aria-label": `Move ${c.name} up`, disabled: i === 0 }, on: { click: () => swap(c, list[i - 1]) } }),
+      h("button", { class: "icon-btn", text: "↓", attrs: { type: "button", "aria-label": `Move ${c.name} down`, disabled: i === list.length - 1 }, on: { click: () => swap(c, list[i + 1]) } }),
+      h("button", { text: "Edit", attrs: { type: "button", "aria-label": `Edit ${c.name}` }, on: { click: () => { choreDraft = { room: null, ...c }; redraw(); } } }),
       h("button", {
         class: "danger", text: "Remove", attrs: { type: "button", "aria-label": `Remove ${c.name}` },
         on: { click: () => { if (confirm(`Take "${c.name}" off the everyday list? Points already earned for it stay counted.`)) act(() => onSaveChore(c.id, { archived: true })); } },
-      }))));
+      })));
 
   const adding = choreDraft && !choreDraft.id;
+  const groups = groupByRoom(active, rooms).map((g) => h("div", { class: "room-group" },
+    h("div", { class: "room-group__head" },
+      h("h3", { class: "room-group__title" },
+        h("span", { text: g.room ? g.room.icon : "📋", attrs: { "aria-hidden": "true" } }),
+        h("span", { text: ` ${g.room ? g.room.name : rooms.length ? "No room" : "All chores"}` }),
+        h("span", { class: "room-group__count", text: ` · ${g.items.length}` })),
+      h("button", { class: "link-btn", text: "+ Add here", attrs: { type: "button", "aria-label": `Add a chore to ${g.room ? g.room.name : "no room"}` },
+        on: { click: () => startAdding(g.room ? g.room.id : null) } })),
+    h("ul", { class: "daily-list" }, g.items.map((c, i, list) => itemRow(c, i, list)))));
+
   return h("section", { class: "chores-section" },
     h("h2", { class: "section-title", text: "Every day" }),
-    h("p", { class: "page-intro", text: "The list on every day's page. Use the arrows to change the order everyone sees." }),
+    h("p", { class: "page-intro" }, "The list on every day's page, grouped by room. Use the arrows to change the order within a room; ",
+      h("a", { text: "Rooms", attrs: { href: "#rooms" } }), " sets which rooms there are and their order."),
     adding ? choreForm(ctx) : h("button", {
       class: "primary add-sched",
       text: "+ Add an everyday chore",
       attrs: { type: "button" },
-      on: { click: () => { choreDraft = { id: null, name: "", icon: null, points: 1, slotsPerDay: 1 }; redraw(); } },
+      on: { click: () => startAdding(null) },
     }),
-    rows.length ? h("ul", { class: "daily-list" }, rows) : h("p", { class: "empty", text: "No everyday chores yet." }),
+    groups.length ? h("div", { class: "room-groups" }, groups) : h("p", { class: "empty", text: "No everyday chores yet." }),
     removed.length ? h("div", { class: "removed" },
       h("h3", { class: "section-title", text: "Removed" }),
       h("ul", { class: "removed__list" }, removed.map((c) => h("li", { class: "removed__item" },
@@ -525,8 +553,10 @@ function scheduleSection({ household, icons, todayKey, onSave, onError, redraw }
   const active = household.schedules.filter((s) => !s.archived);
 
   const lastDone = household.lastDone || {};
+  const rooms = household.rooms || [];
+  const roomById = Object.fromEntries(rooms.map((r) => [r.id, r]));
   const ctx = {
-    icons, people, todayKey, lastDone,
+    icons, people, rooms, todayKey, lastDone,
     onSave: async (id, fields) => {
       await onSave(id, fields); // throws to the form on a validation error
       scheduleDraft = null;
@@ -547,6 +577,7 @@ function scheduleSection({ household, icons, todayKey, onSave, onError, redraw }
           late ? h("span", { class: "sched-item__late", text: `Overdue since ${when(late, todayKey)}` })
             : h("span", { text: next ? (next === todayKey ? "Today" : `Next: ${when(next, todayKey)}`) : "No more dates" }),
           lastDone[s.id] ? h("span", { text: ` · last done ${when(lastDone[s.id], todayKey)}` }) : null,
+          roomById[s.room] ? h("span", { text: ` · ${roomById[s.room].icon} ${roomById[s.room].name}` }) : null,
           h("span", { text: ` · ${s.points} pt${s.points > 1 ? "s" : ""} · ` }),
           s.assignee && who[s.assignee] ? h("span", { class: "sched-item__who", attrs: { style: tint(who[s.assignee].color) } },
             h("span", { text: `${who[s.assignee].icon} ${who[s.assignee].name}` })) : h("span", { text: "Anyone" }))),
@@ -581,4 +612,91 @@ function scheduleSection({ household, icons, todayKey, onSave, onError, redraw }
 export function renderChores(el, ctx) {
   fill(el, everydaySection(ctx), scheduleSection(ctx));
   el.querySelector(".sched-form input[type=text]")?.focus();
+}
+
+/* ---------- Rooms ---------- */
+
+function roomForm({ icons, onSave, onCancel }) {
+  const d = roomDraft;
+  const error = h("p", { class: "form__error", attrs: { role: "alert" } });
+  const iconSlot = h("div");
+  const iconBtn = h("button", { class: "icon-choice", text: d.icon, attrs: { type: "button", "aria-label": "Choose icon" } });
+  iconBtn.addEventListener("click", () => {
+    if (iconSlot.firstChild) return iconSlot.replaceChildren();
+    iconSlot.replaceChildren(iconMenu(icons, d.icon, (icon) => { d.icon = icon; iconBtn.textContent = icon; iconSlot.replaceChildren(); }, { prefer: "Rooms" }));
+  });
+  return h("form", {
+    class: "sched-form room-form",
+    on: {
+      submit: async (e) => {
+        e.preventDefault();
+        error.textContent = "";
+        try { await onSave(d.id, { name: d.name, icon: d.icon }); } catch (err) { error.textContent = err.message; }
+      },
+    },
+  },
+    h("h3", { class: "sched-form__title", text: d.id ? "Edit room" : "New room" }),
+    h("div", { class: "form__row form__row--name" },
+      h("div", { class: "field" }, h("span", { class: "field__label", text: "Icon" }), iconBtn),
+      h("label", { class: "field field--grow" }, h("span", { class: "field__label", text: "Room" }),
+        h("input", {
+          class: "field__input",
+          attrs: { type: "text", value: d.name, maxlength: "30", placeholder: "e.g. Garage", required: true, autocomplete: "off" },
+          on: { input: (e) => { d.name = e.target.value; } },
+        }))),
+    iconSlot,
+    error,
+    h("div", { class: "form__actions" },
+      h("button", { class: "primary", text: d.id ? "Save changes" : "Add room", attrs: { type: "submit" } }),
+      h("button", { text: "Cancel", attrs: { type: "button" }, on: { click: onCancel } })));
+}
+
+export function renderRooms(el, { household, icons, onSaveRoom, onRemoveRoom, onOrderRooms, onError, redraw }) {
+  const rooms = household.rooms || [];
+  const count = (id) => household.chores.filter((c) => !c.archived && c.room === id).length
+    + household.schedules.filter((x) => !x.archived && x.room === id).length;
+  const unassigned = household.chores.filter((c) => !c.archived && !rooms.some((r) => r.id === c.room)).length;
+  const ctx = {
+    icons,
+    onSave: async (id, fields) => { await onSaveRoom(id, fields); roomDraft = null; redraw(); },
+    onCancel: () => { roomDraft = null; redraw(); },
+  };
+  const act = async (fn) => { try { await fn(); } catch (err) { onError(err.message); } };
+  const move = (i, by) => {
+    const ids = rooms.map((r) => r.id);
+    [ids[i], ids[i + by]] = [ids[i + by], ids[i]];
+    act(() => onOrderRooms(ids));
+  };
+
+  const rows = rooms.map((r, i) => roomDraft && roomDraft.id === r.id ? h("li", {}, roomForm(ctx)) : h("li", { class: "daily-item room-item" },
+    h("span", { class: "daily-item__icon", text: r.icon, attrs: { "aria-hidden": "true" } }),
+    h("div", { class: "daily-item__body" },
+      h("div", { class: "daily-item__name", text: r.name }),
+      h("div", { class: "daily-item__meta", text: `${count(r.id)} chore${count(r.id) === 1 ? "" : "s"}` })),
+    h("div", { class: "daily-item__actions" },
+      h("button", { class: "icon-btn", text: "↑", attrs: { type: "button", "aria-label": `Move ${r.name} up`, disabled: i === 0 }, on: { click: () => move(i, -1) } }),
+      h("button", { class: "icon-btn", text: "↓", attrs: { type: "button", "aria-label": `Move ${r.name} down`, disabled: i === rooms.length - 1 }, on: { click: () => move(i, 1) } }),
+      h("button", { text: "Edit", attrs: { type: "button", "aria-label": `Edit ${r.name}` }, on: { click: () => { roomDraft = { ...r }; redraw(); } } }),
+      h("button", {
+        class: "danger", text: "Remove", attrs: { type: "button", "aria-label": `Remove ${r.name}` },
+        on: {
+          click: () => {
+            const n = count(r.id);
+            const msg = n ? `Remove "${r.name}"? Its ${n} chore${n === 1 ? "" : "s"} will stay on the list under "Other".` : `Remove "${r.name}"?`;
+            if (confirm(msg)) act(() => onRemoveRoom(r.id));
+          },
+        },
+      }))));
+
+  fill(el,
+    h("p", { class: "page-intro" }, "Rooms group the chores on each day's page, so it reads room by room instead of as one long list. The order here is the order on the day page. Pick each chore's room on the ",
+      h("a", { text: "Chores", attrs: { href: "#chores" } }), " page."),
+    roomDraft && !roomDraft.id ? roomForm(ctx) : h("button", {
+      class: "primary add-sched", text: "+ Add a room", attrs: { type: "button" },
+      on: { click: () => { roomDraft = { id: null, name: "", icon: "🏠" }; redraw(); } },
+    }),
+    rows.length ? h("ul", { class: "daily-list room-list" }, rows)
+      : h("p", { class: "empty", text: "No rooms yet. Without rooms, each day shows one plain list." }),
+    unassigned ? h("p", { class: "legend", text: `${unassigned} everyday chore${unassigned === 1 ? " has" : "s have"} no room and show${unassigned === 1 ? "s" : ""} under "Other".` }) : null);
+  el.querySelector(".room-form input[type=text]")?.focus();
 }

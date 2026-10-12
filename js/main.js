@@ -1,9 +1,9 @@
 import { catalogFeasibility } from "./config.js";
-import { fetchDay, fetchRange, sendOp, fetchHousehold, savePerson, saveSchedule, saveChore, orderChores, fetchIcons, ConflictError } from "./api.js";
+import { fetchDay, fetchRange, sendOp, fetchHousehold, savePerson, saveSchedule, saveChore, orderChores, saveRoom, removeRoom, orderRooms, fetchIcons, ConflictError } from "./api.js";
 import { toKey, isKey, addDays, weekStart, weekDays, monthOf, addMonths, monthGrid, monthDays, periodTotals } from "./calendar.js";
 import { scheduledFor, choresForDay, dailyFor } from "./schedule.js";
 import { renderScoreboard, renderWeek, renderMonth, renderDay, longDate, shortDate, monthName } from "./views.js";
-import { renderPeople, renderChores, settingsBusy } from "./settings.js";
+import { renderPeople, renderChores, renderRooms, settingsBusy } from "./settings.js";
 import { renderStats, HISTORY_WEEKS } from "./stats.js";
 
 const POLL_MS = 10000;
@@ -22,7 +22,7 @@ function parseRoute() {
   const t = today();
   if (view === "week" || view === "stats") return { view, key: weekStart(isKey(arg) ? arg : t) };
   if (view === "day") return { view, key: isKey(arg) ? arg : t };
-  if (view === "people") return { view };
+  if (view === "people" || view === "rooms") return { view };
   if (view === "chores" || view === "schedule") return { view: "chores" };
   return { view: "month", month: /^\d{4}-\d{2}$/.test(arg || "") ? arg : monthOf(t) };
 }
@@ -61,7 +61,7 @@ async function init() {
   function setNav(route, { prev, next, todayHref, label }) {
     const calendar = route.view === "month" || route.view === "week" || route.view === "day";
     const stepping = calendar || route.view === "stats";
-    for (const v of ["month", "week", "stats", "people", "chores"]) {
+    for (const v of ["month", "week", "stats", "people", "chores", "rooms"]) {
       $(`tab-${v}`).setAttribute("aria-current", route.view === v ? "page" : "false");
     }
     $("tab-month").href = route.view === "day" ? `#month/${monthOf(route.key)}` : "#month";
@@ -104,7 +104,7 @@ async function init() {
       const totals = periodTotals(() => choresForDay(household.chores, household.schedules, key, day, history()), people, { [key]: day }, [key], t);
       renderScoreboard($("scoreboard"), { people, totals, mode: "day", caption: "Points for this day" });
       renderDay(view, {
-        key, todayKey: t, daily: dailyOf(day), scheduled: schedFor(key, day), people, who: who(), day,
+        key, todayKey: t, daily: dailyOf(day), scheduled: schedFor(key, day), rooms: household.rooms || [], people, who: who(), day,
         onToggle: (slotId, pid, on) => act(key, on ? "claim" : "release", slotId, pid),
         onUndo: () => act(key, "undo"),
         onReset: () => {
@@ -117,6 +117,16 @@ async function init() {
       setNav(route, { prev: `#stats/${addDays(route.key, -7)}`, next: `#stats/${addDays(route.key, 7)}`, todayHref: "#stats",
         label: `${current ? "Scores this week" : "Scores"} · ${shortDate(keys[0])} – ${shortDate(keys[6])}` });
       renderStats(view, { weekKey: route.key, todayKey: t, people, daysMap, choresFor });
+    } else if (route.view === "rooms") {
+      setNav(route, { label: "Rooms" });
+      renderRooms(view, {
+        household, icons,
+        onSaveRoom: async (id, fields) => { setHousehold(await saveRoom(id, fields)); draw(); },
+        onRemoveRoom: async (id) => { setHousehold(await removeRoom(id)); draw(); },
+        onOrderRooms: async (ids) => { setHousehold(await orderRooms(ids)); draw(); },
+        onError: (msg) => showFailure(`Couldn't save: ${msg}`),
+        redraw: draw,
+      });
     } else if (route.view === "people") {
       setNav(route, { label: "People" });
       renderPeople(view, {
