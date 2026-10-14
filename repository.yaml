@@ -1,0 +1,5 @@
+# Home Assistant add-on repository: Settings → Add-ons → Add-on Store → ⋮ → Repositories,
+# then add https://github.com/MorningstarOwl/chore-chart
+name: Chore Chart
+url: https://github.com/MorningstarOwl/chore-chart
+maintainer: MorningstarOwl

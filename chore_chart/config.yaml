@@ -1,0 +1,35 @@
+name: Chore Chart
+version: "1.0.0"
+slug: chore_chart
+description: >-
+  A shared household chore calendar: rooms, per-person daily goals,
+  repeating chores and weekly rewards. Shows in the sidebar, and on
+  every phone in the house.
+url: https://github.com/MorningstarOwl/chore-chart
+arch:
+  - aarch64
+  - amd64
+init: false
+startup: application
+boot: auto
+
+# The sidebar panel. HA signs people in; the add-on trusts HA's ingress proxy.
+ingress: true
+ingress_port: 8420
+panel_icon: mdi:broom
+panel_title: Chores
+
+# Also on the network, so phones and a kitchen tablet work without a Home Assistant login.
+# Clear the port in the Network section to make the sidebar the only way in.
+ports:
+  8420/tcp: 8420
+ports_description:
+  8420/tcp: "Chore chart for phones and tablets on your network (no Home Assistant login needed)"
+
+watchdog: http://[HOST]:[PORT:8420]/api/household
+backup: hot
+
+options:
+  title: Chore Chart
+schema:
+  title: str

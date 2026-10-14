@@ -5,7 +5,7 @@ phones, and tap your face when you've done a chore. Points add up per day, week 
 everyone gets their own daily goal; bin night and lawn-mowing show up on the calendar by
 themselves.
 
-One small container, no accounts, no cloud, no database to run. Your data stays in two JSON
+One small container (or a Home Assistant add-on), no accounts, no cloud, no database to run. Your data stays in two JSON
 files on your own machine.
 
 ![Month view](docs/month.png)
@@ -42,6 +42,18 @@ files on your own machine.
 | Week | A day on a phone | Editing chores |
 | --- | --- | --- |
 | ![Week view](docs/week.png) | ![Day view on a phone](docs/day-phone.png) | ![Chores page](docs/chores.png) |
+
+## Home Assistant add-on
+
+[![Add repository to Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FMorningstarOwl%2Fchore-chart)
+
+Run it inside Home Assistant OS or Supervised: **Settings → Add-ons → Add-on Store → ⋮ →
+Repositories**, add `https://github.com/MorningstarOwl/chore-chart`, then install **Chore
+Chart**. It appears as **Chores** in the sidebar, is included in Home Assistant backups, and
+uses Home Assistant's time zone. Port 8420 stays open on your network for phones and tablets
+without a Home Assistant login (clear it in the add-on's Network settings to make the sidebar
+the only way in). Moving from the Docker version: download a backup from it, then post it to
+the add-on's `/api/import` (see the add-on's Documentation tab).
 
 ## Quick start (Docker)
 
@@ -86,6 +98,8 @@ All optional, as environment variables:
 | `CHORE_DATA_DIR` | `/data` | Where `days.json` and `household.json` are kept. |
 | `CHORE_CONFIG_DIR` | *(unset)* | A folder with your own `icons.json`, or a `chores.json` / `participants.json` to start a **new** household with. Files you leave out fall back to the built-in ones. |
 | `CHORE_TRUSTED_ORIGINS` | *(unset)* | Extra origins allowed to save changes, comma-separated. Only needed behind a reverse proxy that rewrites the `Host` header. |
+| `CHORE_TRUSTED_PROXY` | *(unset)* | IP of a proxy (e.g. Home Assistant ingress) whose same-site saves are accepted whatever their origin. |
+| `CHORE_FRAME_ANCESTORS` | `'none'` | CSP `frame-ancestors`; the add-on uses `'self'` so it can appear in Home Assistant's sidebar. |
 
 ### Chores and people
 
@@ -141,7 +155,7 @@ python3 server.py --port 8420 --data ./data
 ## Development
 
 ```bash
-npm test     # 96 JavaScript tests (node --test) + 36 Python server tests; no dependencies to install
+npm test     # 96 JavaScript tests (node --test) + 37 Python server tests; no dependencies to install
 npm start    # http://127.0.0.1:8420/ with data in ./data
 ```
 

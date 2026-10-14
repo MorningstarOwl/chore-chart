@@ -412,6 +412,21 @@ class ServerTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {"CHORE_TRUSTED_ORIGINS": "https://chores.example.com/, http://other"}):
             self.assertEqual(self.post_raw(f"/api/day/{DAY}", undo, {**headers, "Origin": "https://chores.example.com"}), 200)
 
+    def test_ingress_settings(self):
+        with urllib.request.urlopen(self.base + "/") as r:
+            self.assertIn("frame-ancestors 'none'", r.headers["Content-Security-Policy"])
+        with mock.patch.dict(os.environ, {"CHORE_FRAME_ANCESTORS": "'self'"}):
+            with urllib.request.urlopen(self.base + "/") as r:
+                self.assertIn("frame-ancestors 'self'", r.headers["Content-Security-Policy"])
+        body = json.dumps({"op": "clear"}).encode()
+        ha = {"Content-Type": "application/json", "Origin": "http://homeassistant.local:8123", "Sec-Fetch-Site": "same-origin"}
+        self.assertEqual(self.post_raw(f"/api/day/{DAY}", body, ha), 403)
+        with mock.patch.dict(os.environ, {"CHORE_TRUSTED_PROXY": "127.0.0.1"}):
+            self.assertEqual(self.post_raw(f"/api/day/{DAY}", body, ha), 200)
+            # Still no cross-site posts, and still JSON only, even from the proxy.
+            self.assertEqual(self.post_raw(f"/api/day/{DAY}", body, {**ha, "Sec-Fetch-Site": "cross-site"}), 403)
+            self.assertEqual(self.post_raw(f"/api/day/{DAY}", body, {**ha, "Content-Type": "text/plain"}), 403)
+
     def test_only_app_files_are_served(self):
         with urllib.request.urlopen(self.base + "/") as r:
             self.assertIn(b"<title>Chore Chart</title>", r.read())

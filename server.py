@@ -19,6 +19,10 @@ Settings (flags win over environment variables):
   CHORE_TRUSTED_ORIGINS        extra comma-separated origins allowed to write, for a reverse
                                proxy that changes the Host header (the page's own http/https
                                origin is always allowed)
+  CHORE_TRUSTED_PROXY          IP of a proxy whose same-site writes are accepted whatever their
+                               Origin (the Home Assistant add-on sets HA's ingress proxy here)
+  CHORE_FRAME_ANCESTORS        CSP frame-ancestors (default 'none'; the add-on uses 'self' so
+                               the page can show inside Home Assistant's sidebar panel)
   TZ                           the household's time zone; "today" on the server follows it
 
 API (all JSON):
@@ -631,7 +635,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-cache")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", "default-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+        frames = os.environ.get("CHORE_FRAME_ANCESTORS") or "'none'"
+        self.send_header("Content-Security-Policy", f"default-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors {frames}")
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.end_headers()
@@ -691,6 +696,12 @@ class Handler(BaseHTTPRequestHandler):
             return False
         origin = self.headers.get("Origin")
         if origin is None:
+            return True
+        # Home Assistant ingress: the page lives on HA's origin and HA's proxy forwards the request,
+        # so the Origin never matches our Host. HA has already authenticated the user, and the
+        # Sec-Fetch-Site check above still turns away cross-site posts.
+        proxy = os.environ.get("CHORE_TRUSTED_PROXY")
+        if proxy and self.client_address[0] == proxy:
             return True
         host = self.headers.get("Host")
         extra = {o.strip().rstrip("/") for o in os.environ.get("CHORE_TRUSTED_ORIGINS", "").split(",") if o.strip()}

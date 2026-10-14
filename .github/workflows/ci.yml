@@ -22,6 +22,15 @@ jobs:
           python-version: "3.13"
       - run: npm test
 
+  addon:
+    # Checks the Home Assistant add-on's config.yaml/build.yaml against the add-on schema.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: frenck/action-addon-linter@v2
+        with:
+          path: "./chore_chart"
+
   image:
     # Publishes ghcr.io/<owner, lowercased>/chore-chart for amd64 and arm64 (Raspberry Pi) on every push to main and on tags.
     needs: test
