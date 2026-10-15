@@ -1,5 +1,5 @@
 name: Chore Chart
-version: "1.0.0"
+version: "1.0.1"
 slug: chore_chart
 description: >-
   A shared household chore calendar: rooms, per-person daily goals,
@@ -16,6 +16,9 @@ ingress: true
 ingress_port: 8420
 panel_icon: mdi:broom
 panel_title: Chores
+# Everyone in the house logs chores, so the panel is for every Home Assistant user, not only
+# admins (Home Assistant's default for add-on panels is admin-only).
+panel_admin: false
 
 # Also on the network, so phones and a kitchen tablet work without a Home Assistant login.
 # Clear the port in the Network section to make the sidebar the only way in.

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1
+
+- The Chores sidebar panel now shows for every Home Assistant user, not only administrators.
+
 ## 1.0.0
 
 - First release as a Home Assistant add-on: sidebar panel through ingress, plus port 8420

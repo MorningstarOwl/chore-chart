@@ -6,7 +6,8 @@ picture when you've done a chore.
 
 ## First steps
 
-1. Start the add-on and turn on **Show in sidebar**.
+1. Start the add-on and turn on **Show in sidebar**. The panel shows for every Home Assistant
+   user, not only administrators, so children's or family accounts can open it too.
 2. Open **Chores** in the sidebar.
 3. **People**: rename the four sample people, pick colours and critters, and set each
    person's daily goal and weekly reward. Add or remove people.

@@ -1,6 +1,6 @@
 # The add-on is the published chore-chart image plus a start script. Bump these tags together
-# with `version` in config.yaml; CI publishes ghcr.io/morningstarowl/chore-chart:<version>
+# with `version` in config.yaml; CI publishes ghcr.io/morningstarowl/chore-chart:1.0.1
 # when a v<version> tag is pushed.
 build_from:
-  aarch64: ghcr.io/morningstarowl/chore-chart:1.0.0
-  amd64: ghcr.io/morningstarowl/chore-chart:1.0.0
+  aarch64: ghcr.io/morningstarowl/chore-chart:1.0.1
+  amd64: ghcr.io/morningstarowl/chore-chart:1.0.1
